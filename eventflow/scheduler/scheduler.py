@@ -261,6 +261,7 @@ class Scheduler:
                 graph=graph,
                 node=node,
                 handler_result=result,
+                execution_state=execution_state,
             )
             log_variable_change(func_name, "selected_edges", selected_edges)
             for iteration, edge in enumerate(selected_edges):
@@ -321,6 +322,7 @@ class Scheduler:
         graph: Graph,
         node: Node,
         handler_result: Any,
+        execution_state: ExecutionState,
     ) -> List[Edge]:
         """Select downstream edges to activate after a node completes."""
 
@@ -346,16 +348,51 @@ class Scheduler:
         route = handler_result
         log_variable_change(func_name, "route", route)
         selected: List[Edge] = []
+        exit_edges: List[Edge] = []
         log_variable_change(func_name, "selected", selected)
         for iteration, edge in enumerate(edges):
             log_loop_iteration(func_name, "switch_edges", iteration)
             metadata_route = edge.metadata.get("route")
             log_variable_change(func_name, "metadata_route", metadata_route)
             if metadata_route == route:
-                selected.append(edge)
-                log_variable_change(func_name, "selected", list(selected))
-        log_variable_change(func_name, "selected_final", selected)
-        return selected
+                has_capacity = self._has_remaining_visits(
+                    graph, execution_state, edge.target
+                )
+                log_variable_change(func_name, "has_capacity", has_capacity)
+                if has_capacity:
+                    selected.append(edge)
+                    log_variable_change(func_name, "selected", list(selected))
+                else:
+                    log_branch(func_name, "target_exhausted")
+            if metadata_route == "exit":
+                exit_edges.append(edge)
+                log_variable_change(func_name, "exit_edges", list(exit_edges))
+
+        if selected:
+            log_variable_change(func_name, "selected_final", selected)
+            return selected
+        if exit_edges:
+            log_branch(func_name, "fallback_exit")
+            return exit_edges
+        log_branch(func_name, "no_matching_edge")
+        return []
+
+    def _has_remaining_visits(
+        self, graph: Graph, execution_state: ExecutionState, node_id: str
+    ) -> bool:
+        func_name = "Scheduler._has_remaining_visits"
+        log_parameter(func_name, node_id=node_id)
+        node = graph.nodes[node_id]
+        log_variable_change(func_name, "node", node)
+        if node.max_visits is None:
+            log_branch(func_name, "no_visit_limit")
+            return True
+        state = execution_state._ensure_state(node_id)
+        visits = state.visits.count
+        log_variable_change(func_name, "visits", visits)
+        has_capacity = visits < node.max_visits
+        log_variable_change(func_name, "has_capacity", has_capacity)
+        return has_capacity
 
     def _load_or_create_state(self, graph_id: str) -> ExecutionState:
         """Retrieve execution state from snapshots if available."""
