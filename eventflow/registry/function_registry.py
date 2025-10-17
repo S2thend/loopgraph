@@ -2,13 +2,56 @@
 
 from __future__ import annotations
 
-import asyncio
 import inspect
-from typing import Any, Awaitable, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict, TypeGuard
 
 from .._debug import log_branch, log_parameter, log_variable_change
 
 Handler = Callable[..., Any]
+
+
+def _is_awaitable(value: object) -> TypeGuard[Awaitable[Any]]:
+    """Type guard helping to determine whether a value can be awaited.
+
+    >>> _is_awaitable(1)
+    False
+    >>> class DummyAwaitable:
+    ...     def __await__(self):
+    ...         yield
+    ...         return None
+    >>> _is_awaitable(DummyAwaitable())
+    True
+    """
+
+    func_name = "_is_awaitable"
+    log_parameter(func_name, value=value)
+    result = inspect.isawaitable(value)
+    log_variable_change(func_name, "result", result)
+    return bool(result)
+
+
+async def _resolve_result(value: object) -> Any:
+    """Normalize handler results into awaited values.
+
+    >>> import asyncio
+    >>> asyncio.run(_resolve_result(3))
+    3
+    >>> async def sample() -> str:
+    ...     return "ok"
+    >>> asyncio.run(_resolve_result(sample()))
+    'ok'
+    """
+
+    func_name = "_resolve_result"
+    log_parameter(func_name, value=value)
+    if _is_awaitable(value):
+        log_branch(func_name, "awaitable")
+        awaited = await value
+        log_variable_change(func_name, "awaited", awaited)
+        return awaited
+    log_branch(func_name, "immediate")
+    log_variable_change(func_name, "value", value)
+    return value
 
 
 class FunctionRegistry:
@@ -69,10 +112,6 @@ class FunctionRegistry:
         log_variable_change(func_name, "handler", handler)
         result = handler(*args, **kwargs)
         log_variable_change(func_name, "result", result)
-        if inspect.isawaitable(result):
-            log_branch(func_name, "await_result")
-            awaited = await result  # type: ignore[no-any-union]
-            log_variable_change(func_name, "awaited", awaited)
-            return awaited
-        log_branch(func_name, "return_result")
-        return result
+        resolved = await _resolve_result(result)
+        log_variable_change(func_name, "resolved", resolved)
+        return resolved

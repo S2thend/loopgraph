@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, cast
 
 from .._debug import (
     log_branch,
@@ -217,39 +217,63 @@ class Graph:
         return payload
 
     @classmethod
-    def from_dict(cls, payload: Dict[str, Iterable[Dict[str, object]]]) -> "Graph":
+    def from_dict(cls, payload: Mapping[str, Iterable[Mapping[str, object]]]) -> "Graph":
         """Deserialize a graph from a dictionary payload."""
         func_name = "Graph.from_dict"
         log_parameter(func_name, payload=payload)
-        node_entries = payload.get("nodes", [])
+        empty_nodes: Iterable[Mapping[str, object]] = []
+        node_entries = payload.get("nodes", empty_nodes)
         log_variable_change(func_name, "node_entries", node_entries)
         nodes: Dict[str, Node] = {}
         log_variable_change(func_name, "nodes", nodes)
         for iteration, entry in enumerate(node_entries):
             log_loop_iteration(func_name, "nodes", iteration)
+            config_entry = entry.get("config", {})
+            config = (
+                dict(cast(Mapping[str, Any], config_entry))
+                if isinstance(config_entry, Mapping)
+                else {}
+            )
+            log_variable_change(func_name, "config", config)
+            max_visits_value = entry.get("max_visits")
+            max_visits = cast(Optional[int], max_visits_value)
+            log_variable_change(func_name, "max_visits", max_visits)
+            priority_value = cast(Optional[int], entry.get("priority"))
+            priority = priority_value if priority_value is not None else 0
+            log_variable_change(func_name, "priority", priority)
+            allow_partial_value = entry.get("allow_partial_upstream", False)
+            log_variable_change(func_name, "allow_partial_value", allow_partial_value)
             node = Node(
                 id=str(entry["id"]),
                 kind=NodeKind(entry["kind"]),
                 handler=str(entry["handler"]),
-                config=dict(entry.get("config", {})),
-                max_visits=entry.get("max_visits"),
-                priority=int(entry.get("priority", 0)),
-                allow_partial_upstream=bool(entry.get("allow_partial_upstream", False)),
+                config=config,
+                max_visits=max_visits,
+                priority=priority,
+                allow_partial_upstream=bool(allow_partial_value),
             )
             nodes[node.id] = node
             log_variable_change(func_name, f"nodes[{node.id}]", nodes[node.id])
 
-        edge_entries = payload.get("edges", [])
+        empty_edges: Iterable[Mapping[str, object]] = []
+        edge_entries = payload.get("edges", empty_edges)
         log_variable_change(func_name, "edge_entries", edge_entries)
         edges: Dict[str, Edge] = {}
         log_variable_change(func_name, "edges", edges)
         for iteration, entry in enumerate(edge_entries):
             log_loop_iteration(func_name, "edges", iteration)
+            metadata_entry = entry.get("metadata", {})
+            metadata = (
+                dict(cast(Mapping[str, Any], metadata_entry))
+                if isinstance(metadata_entry, Mapping)
+                else {}
+            )
+            log_variable_change(func_name, "metadata", metadata)
             edge = Edge(
                 id=str(entry["id"]),
                 source=str(entry["source"]),
                 target=str(entry["target"]),
-                metadata=dict(entry.get("metadata", {})),
+                metadata=metadata,
             )
             edges[edge.id] = edge
             log_variable_change(func_name, f"edges[{edge.id}]", edges[edge.id])

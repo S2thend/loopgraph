@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 from .._debug import (
     log_branch,
@@ -15,7 +15,7 @@ from .._debug import (
 )
 from ..core.types import EventType, NodeStatus
 
-EventListener = Callable[["Event"], Awaitable[None]]
+EventListener = Callable[["Event"], Coroutine[Any, Any, None]]
 
 
 @dataclass(frozen=True)
@@ -145,13 +145,13 @@ class EventBus:
         log_variable_change(func_name, "typed_listeners", listeners)
         global_listeners = list(self._listeners.get(None, []))
         log_variable_change(func_name, "global_listeners", global_listeners)
-        all_listeners = listeners + global_listeners
+        all_listeners: List[EventListener] = listeners + global_listeners
         log_variable_change(func_name, "all_listeners", all_listeners)
         if not all_listeners:
             log_branch(func_name, "no_listeners")
             return []
         log_branch(func_name, "dispatch_listeners")
-        tasks = []
+        tasks: List[asyncio.Task[None]] = []
         log_variable_change(func_name, "tasks", tasks)
         for iteration, listener in enumerate(all_listeners):
             log_loop_iteration(func_name, "listeners", iteration)

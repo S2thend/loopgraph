@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import AsyncIterator, cast
 
 from .._debug import log_branch, log_parameter, log_variable_change
 
@@ -43,7 +43,7 @@ class SemaphorePolicy:
         """
         func_name = "SemaphorePolicy.available_permits"
         log_parameter(func_name)
-        permits = self._semaphore._value  # type: ignore[attr-defined]
+        permits = cast(int, getattr(self._semaphore, "_value", 0))
         log_variable_change(func_name, "permits", permits)
         return permits
 

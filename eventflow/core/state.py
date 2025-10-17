@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 from .._debug import (
     log_branch,
@@ -12,7 +12,7 @@ from .._debug import (
     log_variable_change,
 )
 from .graph import Graph
-from .types import NodeKind, NodeStatus, VisitOutcome
+from .types import NodeStatus, VisitOutcome
 
 
 @dataclass
@@ -124,7 +124,8 @@ class NodeRuntimeState:
 class ExecutionState:
     """Container for per-node runtime state tracking.
 
-    >>> from .graph import Node, Edge
+    >>> from eventflow.core.graph import Edge, Node
+    >>> from eventflow.core.types import NodeKind
     >>> graph = Graph(
     ...     nodes={
     ...         "a": Node(id="a", kind=NodeKind.TASK, handler="A"),
