@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eventflow2"
+version = "0.1.0"
+description = "Asynchronous graph-driven workflow engine."
+authors = [
+  { name = "EventFlow2 Team" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+test = [
+  "pytest>=7.4.0",
+  "pytest-asyncio>=0.21.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["eventflow*"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

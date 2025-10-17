@@ -1,0 +1,1 @@
+"""Function registry primitives."""
