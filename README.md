@@ -21,5 +21,7 @@ pytest
 - `eventflow/concurrency/policies.py` implements the semaphore-based concurrency policy.
 - `eventflow/registry/function_registry.py` stores handler functions and executes them with awaitable support.
 - `eventflow/scheduler/scheduler.py` coordinates linear workflows by combining the registry, state, and event bus.
+- `eventflow/persistence/event_log.py` and `eventflow/persistence/snapshot.py` provide in-memory persistence primitives.
+- `eventflow/diagnostics/inspect.py` supplies inspection helpers for graphs and execution state summaries.
 
 Each function includes doctest examples; the `tests/test_doctests.py` suite ensures the documentation remains executable.

@@ -8,6 +8,9 @@ import eventflow
 import eventflow._debug as debug_module
 import eventflow.bus.eventbus as eventbus_module
 import eventflow.concurrency.policies as policies_module
+import eventflow.diagnostics.inspect as diagnostics_module
+import eventflow.persistence.event_log as event_log_module
+import eventflow.persistence.snapshot as snapshot_module
 import eventflow.registry.function_registry as registry_module
 import eventflow.scheduler.scheduler as scheduler_module
 from eventflow import log_loop_iteration, log_parameter, log_variable_change
@@ -30,6 +33,9 @@ def test_doctests() -> None:
         policies_module,
         registry_module,
         scheduler_module,
+        event_log_module,
+        snapshot_module,
+        diagnostics_module,
     ]
     log_variable_change(func_name, "modules", modules)
     for iteration, module in enumerate(modules):
