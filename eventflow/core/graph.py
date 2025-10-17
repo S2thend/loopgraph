@@ -130,6 +130,44 @@ class Graph:
             else:
                 log_branch(func_name, "handler_present")
 
+            if node.kind is NodeKind.SWITCH:
+                log_branch(func_name, "switch_node_check")
+                switch_edges = self._forward_adj.get(node.id, [])
+                log_variable_change(func_name, "switch_edges", switch_edges)
+                missing_route = [
+                    edge.id for edge in switch_edges if "route" not in edge.metadata
+                ]
+                log_variable_change(func_name, "missing_route", missing_route)
+                if missing_route:
+                    log_branch(func_name, "switch_missing_route")
+                    raise ValueError(
+                        f"Switch node '{node.id}' requires route metadata on edges: {missing_route}"
+                    )
+            elif node.kind is NodeKind.AGGREGATE:
+                log_branch(func_name, "aggregate_node_check")
+                required_raw = node.config.get("required")
+                log_variable_change(func_name, "required_raw", required_raw)
+                if required_raw is not None:
+                    if not isinstance(required_raw, int):
+                        log_branch(func_name, "aggregate_required_not_int")
+                        raise ValueError(
+                            f"Aggregate node '{node.id}' requires integer 'required' config"
+                        )
+                    if required_raw <= 0:
+                        log_branch(func_name, "aggregate_required_non_positive")
+                        raise ValueError(
+                            f"Aggregate node '{node.id}' requires 'required' > 0"
+                        )
+                    upstream_count = len(self.upstream_nodes(node.id))
+                    log_variable_change(
+                        func_name, "upstream_count", upstream_count
+                    )
+                    if required_raw > upstream_count:
+                        log_branch(func_name, "aggregate_required_exceeds_upstream")
+                        raise ValueError(
+                            f"Aggregate node '{node.id}' requires {required_raw} upstream nodes but only has {upstream_count}"
+                        )
+
         if invalid_handlers:
             log_branch(func_name, "invalid_handlers_error")
             raise ValueError(f"Nodes missing handlers: {invalid_handlers}")
@@ -159,6 +197,30 @@ class Graph:
         targets = [self.nodes[edge.target] for edge in edges]
         log_variable_change(func_name, "targets", targets)
         return targets
+
+    def downstream_edges(self, node_id: str) -> List[Edge]:
+        """Return edges originating from the given node.
+
+        >>> graph = Graph(
+        ...     nodes={
+        ...         "a": Node(id="a", kind=NodeKind.TASK, handler="A"),
+        ...         "b": Node(id="b", kind=NodeKind.TASK, handler="B"),
+        ...     },
+        ...     edges={"e": Edge(id="e", source="a", target="b")},
+        ... )
+        >>> [edge.id for edge in graph.downstream_edges("a")]
+        ['e']
+        """
+
+        func_name = "Graph.downstream_edges"
+        log_parameter(func_name, node_id=node_id)
+        if node_id not in self.nodes:
+            log_branch(func_name, "missing_node")
+            raise KeyError(f"Node '{node_id}' not found")
+        log_branch(func_name, "node_present")
+        edges = list(self._forward_adj.get(node_id, []))
+        log_variable_change(func_name, "edges", edges)
+        return edges
 
     def upstream_nodes(self, node_id: str) -> List[Node]:
         """Return nodes that must complete before the given node.

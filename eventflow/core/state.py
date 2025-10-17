@@ -12,7 +12,7 @@ from .._debug import (
     log_variable_change,
 )
 from .graph import Graph
-from .types import NodeStatus, VisitOutcome
+from .types import NodeKind, NodeStatus, VisitOutcome
 
 
 @dataclass
@@ -140,6 +140,29 @@ class ExecutionState:
     >>> runtime.mark_complete("a", event_id="evt-1", outcome=VisitOutcome.success())
     >>> runtime.is_ready(graph, "b")
     True
+    >>> agg_graph = Graph(
+    ...     nodes={
+    ...         "x": Node(id="x", kind=NodeKind.TASK, handler="X"),
+    ...         "y": Node(id="y", kind=NodeKind.TASK, handler="Y"),
+    ...         "agg": Node(
+    ...             id="agg",
+    ...             kind=NodeKind.AGGREGATE,
+    ...             handler="Aggregate",
+    ...             config={"required": 2},
+    ...         ),
+    ...     },
+    ...     edges={
+    ...         "e1": Edge(id="e1", source="x", target="agg"),
+    ...         "e2": Edge(id="e2", source="y", target="agg"),
+    ...     },
+    ... )
+    >>> runtime_agg = ExecutionState()
+    >>> runtime_agg.note_upstream_completion("agg", "x")
+    >>> runtime_agg.is_ready(agg_graph, "agg")
+    False
+    >>> runtime_agg.note_upstream_completion("agg", "y")
+    >>> runtime_agg.is_ready(agg_graph, "agg")
+    True
     """
 
     def __init__(self) -> None:
@@ -187,6 +210,23 @@ class ExecutionState:
         if not upstream_nodes:
             log_branch(func_name, "no_upstream")
             return True
+
+        if node.kind is NodeKind.AGGREGATE:
+            log_branch(func_name, "aggregate_check")
+            required_raw = node.config.get("required")
+            log_variable_change(func_name, "required_raw", required_raw)
+            if isinstance(required_raw, int) and required_raw > 0:
+                required = required_raw
+            else:
+                required = len(upstream_nodes)
+            log_variable_change(func_name, "required", required)
+            completed_count = len(state.upstream_completed)
+            log_variable_change(func_name, "completed_count", completed_count)
+            if completed_count >= required:
+                log_branch(func_name, "aggregate_ready")
+                return True
+            log_branch(func_name, "aggregate_waiting")
+            return False
 
         completed_required = True
         log_variable_change(func_name, "completed_required", completed_required)
