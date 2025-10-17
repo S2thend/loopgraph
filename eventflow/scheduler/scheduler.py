@@ -11,7 +11,7 @@ from .._debug import (
     log_variable_change,
 )
 from ..bus.eventbus import Event, EventBus
-from ..concurrency.policies import SemaphorePolicy
+from ..concurrency import ConcurrencyManager, SemaphorePolicy
 from ..core.graph import Edge, Graph, Node
 from ..core.state import ExecutionState
 from ..core.types import EventType, NodeKind, NodeStatus, VisitOutcome
@@ -76,7 +76,7 @@ class Scheduler:
         self,
         registry: FunctionRegistry,
         event_bus: EventBus,
-        concurrency_policy: SemaphorePolicy,
+        concurrency_manager: ConcurrencyManager,
         *,
         snapshot_store: Optional[SnapshotStore] = None,
         event_log: Optional[EventLog] = None,
@@ -93,9 +93,15 @@ class Scheduler:
         log_variable_change(func_name, "self._registry", self._registry)
         self._event_bus = event_bus
         log_variable_change(func_name, "self._event_bus", self._event_bus)
-        self._concurrency_policy = concurrency_policy
+        self._concurrency_manager = concurrency_manager
         log_variable_change(
-            func_name, "self._concurrency_policy", self._concurrency_policy
+            func_name, "self._concurrency_manager", self._concurrency_manager
+        )
+        self._uses_default_semaphore = isinstance(
+            self._concurrency_manager, SemaphorePolicy
+        )
+        log_variable_change(
+            func_name, "self._uses_default_semaphore", self._uses_default_semaphore
         )
         self._event_counter = 0
         log_variable_change(func_name, "self._event_counter", self._event_counter)
@@ -207,7 +213,9 @@ class Scheduler:
         log_parameter(
             func_name, node=node, graph=graph, upstream_payload=upstream_payload
         )
-        async with self._concurrency_policy.slot():
+        priority = node.priority
+        log_variable_change(func_name, "priority", priority)
+        async with self._concurrency_manager.slot(node.id, priority=priority):
             log_branch(func_name, "acquired_slot")
             try:
                 result = await self._registry.execute(node.handler, upstream_payload)

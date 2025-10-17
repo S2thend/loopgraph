@@ -18,7 +18,7 @@ pytest
 - `eventflow/core/types.py` defines the enums and outcome helpers reused throughout the codebase.
 - `eventflow/core/state.py` captures execution progress, visit tracking, and snapshot support.
 - `eventflow/bus/eventbus.py` offers an in-memory async event bus for workflow signals.
-- `eventflow/concurrency/policies.py` implements the semaphore-based concurrency policy.
+- `eventflow/concurrency/policies.py` implements pluggable concurrency managers, including a priority-aware global semaphore.
 - `eventflow/registry/function_registry.py` stores handler functions and executes them with awaitable support.
 - `eventflow/scheduler/scheduler.py` coordinates linear workflows, supports switch/aggregate semantics, and integrates persistence for recovery.
 - `eventflow/persistence/event_log.py` and `eventflow/persistence/snapshot.py` provide in-memory persistence primitives.
