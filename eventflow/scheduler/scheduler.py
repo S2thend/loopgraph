@@ -15,6 +15,7 @@ from ..concurrency.policies import SemaphorePolicy
 from ..core.graph import Edge, Graph, Node
 from ..core.state import ExecutionState
 from ..core.types import EventType, NodeKind, NodeStatus, VisitOutcome
+from ..persistence import EventLog, SnapshotStore
 from ..registry.function_registry import FunctionRegistry
 
 
@@ -46,6 +47,29 @@ class Scheduler:
     ...     return results
     >>> asyncio.run(run())
     {'start': ['start'], 'branch': 'right', 'end': 'right-done'}
+    >>> from eventflow.core.types import EventType
+    >>> from eventflow.persistence import InMemoryEventLog, InMemorySnapshotStore
+    >>> async def run_with_persistence() -> Dict[str, Any]:
+    ...     bus = EventBus()
+    ...     policy = SemaphorePolicy(limit=2)
+    ...     store = InMemorySnapshotStore()
+    ...     event_log = InMemoryEventLog()
+    ...     scheduler = Scheduler(
+    ...         registry,
+    ...         bus,
+    ...         policy,
+    ...         snapshot_store=store,
+    ...         event_log=event_log,
+    ...     )
+    ...     await scheduler.run(graph, graph_id="demo", initial_payload=[])
+    ...     snapshot = store.load("demo")
+    ...     event_types = [evt.type.name for evt in event_log.iter("demo")]
+    ...     return {
+    ...         "completed": snapshot["completed_nodes"],
+    ...         "events": event_types,
+    ...     }
+    >>> asyncio.run(run_with_persistence())
+    {'completed': ['branch', 'end', 'start'], 'events': ['NODE_SCHEDULED', 'NODE_COMPLETED', 'NODE_SCHEDULED', 'NODE_COMPLETED', 'NODE_SCHEDULED', 'NODE_COMPLETED']}
     """
 
     def __init__(
@@ -53,9 +77,18 @@ class Scheduler:
         registry: FunctionRegistry,
         event_bus: EventBus,
         concurrency_policy: SemaphorePolicy,
+        *,
+        snapshot_store: Optional[SnapshotStore] = None,
+        event_log: Optional[EventLog] = None,
     ) -> None:
         func_name = "Scheduler.__init__"
-        log_parameter(func_name, registry=registry, event_bus=event_bus)
+        log_parameter(
+            func_name,
+            registry=registry,
+            event_bus=event_bus,
+            snapshot_store=snapshot_store,
+            event_log=event_log,
+        )
         self._registry = registry
         log_variable_change(func_name, "self._registry", self._registry)
         self._event_bus = event_bus
@@ -66,21 +99,36 @@ class Scheduler:
         )
         self._event_counter = 0
         log_variable_change(func_name, "self._event_counter", self._event_counter)
+        self._snapshot_store = snapshot_store
+        log_variable_change(func_name, "self._snapshot_store", self._snapshot_store)
+        self._event_log = event_log
+        log_variable_change(func_name, "self._event_log", self._event_log)
 
     async def run(
         self,
         graph: Graph,
+        *,
+        graph_id: str = "graph",
         initial_payload: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Execute nodes in the graph until completion."""
         func_name = "Scheduler.run"
-        log_parameter(func_name, graph=graph, initial_payload=initial_payload)
-        execution_state = ExecutionState()
+        log_parameter(
+            func_name,
+            graph=graph,
+            graph_id=graph_id,
+            initial_payload=initial_payload,
+        )
+        execution_state = self._load_or_create_state(graph_id)
         log_variable_change(func_name, "execution_state", execution_state)
-        pending = set(graph.nodes.keys())
-        log_variable_change(func_name, "pending", pending)
-        results: Dict[str, Any] = {}
+        snapshot_data = execution_state.snapshot()
+        log_variable_change(func_name, "snapshot_data", snapshot_data)
+        results = self._initial_results_from_snapshot(snapshot_data)
         log_variable_change(func_name, "results", results)
+        completed_nodes = set(snapshot_data["completed_nodes"])
+        log_variable_change(func_name, "completed_nodes", completed_nodes)
+        pending = {node_id for node_id in graph.nodes if node_id not in completed_nodes}
+        log_variable_change(func_name, "pending", pending)
         loop_iteration = 0
         while pending:
             log_loop_iteration(func_name, "pending_loop", loop_iteration)
@@ -107,10 +155,10 @@ class Scheduler:
                     initial_payload=initial_payload,
                 )
                 log_variable_change(func_name, "input_payload", input_payload)
-                await self._event_bus.emit(
+                await self._dispatch_event(
                     Event(
                         id=event_id,
-                        graph_id="graph",
+                        graph_id=graph_id,
                         node_id=node_id,
                         type=EventType.NODE_SCHEDULED,
                         payload=input_payload,
@@ -121,6 +169,7 @@ class Scheduler:
                     node=node,
                     graph=graph,
                     execution_state=execution_state,
+                    graph_id=graph_id,
                     upstream_payload=input_payload,
                 )
                 log_variable_change(func_name, "handler_result", handler_result)
@@ -132,6 +181,7 @@ class Scheduler:
                 log_branch(func_name, "no_progress")
                 raise RuntimeError("Scheduler could not make progress")
         log_branch(func_name, "completed")
+        self._persist_snapshot(execution_state, graph_id)
         return results
 
     def _next_event_id(self, node_id: str) -> str:
@@ -149,6 +199,7 @@ class Scheduler:
         node: Node,
         graph: Graph,
         execution_state: ExecutionState,
+        graph_id: str,
         upstream_payload: Optional[Any],
     ) -> Any:
         """Execute a single node handler."""
@@ -168,26 +219,27 @@ class Scheduler:
                 event_id = self._next_event_id(node.id)
                 log_variable_change(func_name, "event_id", event_id)
                 execution_state.mark_failed(node.id, event_id, outcome)
-                await self._event_bus.emit(
+                await self._dispatch_event(
                     Event(
                         id=event_id,
-                        graph_id="graph",
+                        graph_id=graph_id,
                         node_id=node.id,
                         type=EventType.NODE_FAILED,
                         payload={"error": str(exc)},
                         status=NodeStatus.FAILED,
                     )
                 )
+                self._persist_snapshot(execution_state, graph_id)
                 raise
             outcome = VisitOutcome.success(result)
             log_variable_change(func_name, "outcome", outcome)
             event_id = self._next_event_id(node.id)
             log_variable_change(func_name, "event_id", event_id)
             execution_state.mark_complete(node.id, event_id, outcome)
-            await self._event_bus.emit(
+            await self._dispatch_event(
                 Event(
                     id=event_id,
-                    graph_id="graph",
+                    graph_id=graph_id,
                     node_id=node.id,
                     type=EventType.NODE_COMPLETED,
                     payload=result,
@@ -209,6 +261,7 @@ class Scheduler:
                 downstream = graph.nodes[edge.target]
                 log_variable_change(func_name, "downstream", downstream)
                 execution_state.note_upstream_completion(downstream.id, node.id)
+            self._persist_snapshot(execution_state, graph_id)
             return result
 
     def _build_input_payload(
@@ -295,3 +348,76 @@ class Scheduler:
                 log_variable_change(func_name, "selected", list(selected))
         log_variable_change(func_name, "selected_final", selected)
         return selected
+
+    def _load_or_create_state(self, graph_id: str) -> ExecutionState:
+        """Retrieve execution state from snapshots if available."""
+
+        func_name = "Scheduler._load_or_create_state"
+        log_parameter(func_name, graph_id=graph_id)
+        if not self._snapshot_store:
+            log_branch(func_name, "no_snapshot_store")
+            state = ExecutionState()
+            log_variable_change(func_name, "state", state)
+            return state
+
+        try:
+            snapshot_payload = self._snapshot_store.load(graph_id)
+        except KeyError:
+            log_branch(func_name, "snapshot_missing")
+            state = ExecutionState()
+        else:
+            log_branch(func_name, "snapshot_loaded")
+            state = ExecutionState.restore(dict(snapshot_payload))
+        log_variable_change(func_name, "state", state)
+        return state
+
+    def _initial_results_from_snapshot(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract node results from a snapshot payload."""
+
+        func_name = "Scheduler._initial_results_from_snapshot"
+        log_parameter(func_name, snapshot=snapshot)
+        results: Dict[str, Any] = {}
+        log_variable_change(func_name, "results", results)
+        states = snapshot.get("states", {})
+        log_variable_change(func_name, "states", states)
+        for iteration, (node_id, node_state) in enumerate(states.items()):
+            log_loop_iteration(func_name, "states", iteration)
+            status_value = node_state.get("status")
+            log_variable_change(func_name, "status_value", status_value)
+            if status_value == NodeStatus.COMPLETED.value:
+                payload = node_state.get("last_payload")
+                log_variable_change(func_name, "payload", payload)
+                if payload is not None:
+                    results[node_id] = payload
+                    log_variable_change(
+                        func_name, f"results[{node_id!r}]", results[node_id]
+                    )
+        log_variable_change(func_name, "results_final", results)
+        return results
+
+    def _persist_snapshot(
+        self, execution_state: ExecutionState, graph_id: str
+    ) -> None:
+        """Persist execution state snapshot if a store is configured."""
+
+        func_name = "Scheduler._persist_snapshot"
+        log_parameter(func_name, graph_id=graph_id)
+        if not self._snapshot_store:
+            log_branch(func_name, "no_snapshot_store")
+            return
+        snapshot = execution_state.snapshot()
+        log_variable_change(func_name, "snapshot", snapshot)
+        self._snapshot_store.save(graph_id, snapshot)
+        log_branch(func_name, "snapshot_saved")
+
+    async def _dispatch_event(self, event: Event) -> None:
+        """Append an event to the log and publish it on the bus."""
+
+        func_name = "Scheduler._dispatch_event"
+        log_parameter(func_name, event=event)
+        if self._event_log:
+            self._event_log.append(event)
+            log_branch(func_name, "event_logged")
+        else:
+            log_branch(func_name, "no_event_log")
+        await self._event_bus.emit(event)

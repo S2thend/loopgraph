@@ -20,7 +20,7 @@ pytest
 - `eventflow/bus/eventbus.py` offers an in-memory async event bus for workflow signals.
 - `eventflow/concurrency/policies.py` implements the semaphore-based concurrency policy.
 - `eventflow/registry/function_registry.py` stores handler functions and executes them with awaitable support.
-- `eventflow/scheduler/scheduler.py` coordinates linear workflows by combining the registry, state, and event bus.
+- `eventflow/scheduler/scheduler.py` coordinates linear workflows, supports switch/aggregate semantics, and integrates persistence for recovery.
 - `eventflow/persistence/event_log.py` and `eventflow/persistence/snapshot.py` provide in-memory persistence primitives.
 - `eventflow/diagnostics/inspect.py` supplies inspection helpers for graphs and execution state summaries.
 
