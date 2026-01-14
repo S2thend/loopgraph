@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Iterable, cast
 
 from eventflow.bus.eventbus import EventBus
 from eventflow.concurrency import PrioritySemaphorePolicy
@@ -22,8 +23,10 @@ def test_complex_workflow_with_switch_and_merge() -> None:
         return payload.get("route", "skip")  # type: ignore[return-value]
 
     def process_handler(payload: dict[str, object]) -> dict[str, object]:
-        items = payload.get("items", [])
-        return {"processed": [item * 2 for item in items]}
+        values = payload.get("items", [])
+        items = values if isinstance(values, list) else []
+        doubled = [int(item) * 2 for item in items]
+        return {"processed": doubled}
 
     def audit_handler(_: dict[str, object]) -> dict[str, object]:
         return {"audit": "ok"}
@@ -125,7 +128,8 @@ def test_complex_workflow_with_switch_and_merge() -> None:
     assert results["final"] == "processed=[2, 4, 6] audit=ok"
 
     snapshot = snapshot_store.load("integration")
-    assert set(snapshot["completed_nodes"]) == {
+    completed = set(cast(Iterable[str], snapshot.get("completed_nodes", [])))
+    assert completed == {
         "start",
         "switch",
         "process",
@@ -190,3 +194,86 @@ def test_loop_respects_max_visits() -> None:
         execution_state=state,
     )
     assert selected and selected[0].target == "exit"
+
+
+def test_global_concurrency_across_schedulers() -> None:
+    policy = PrioritySemaphorePolicy(limit=1)
+    bus = EventBus()
+
+    registry_a = FunctionRegistry()
+    registry_b = FunctionRegistry()
+
+    order: list[str] = []
+
+    async def worker(name: str) -> str:
+        order.append(f"start-{name}")
+        await asyncio.sleep(0.01)
+        order.append(f"end-{name}")
+        return name
+
+    registry_a.register("task", lambda _: worker("A"))
+    registry_b.register("task", lambda _: worker("B"))
+
+    graph = Graph(
+        nodes={"task": Node(id="task", kind=NodeKind.TASK, handler="task")},
+        edges={},
+    )
+
+    scheduler_a = Scheduler(registry_a, bus, policy)
+    scheduler_b = Scheduler(registry_b, bus, policy)
+
+    async def run_all() -> None:
+        await asyncio.gather(
+            scheduler_a.run(graph, graph_id="A"),
+            scheduler_b.run(graph, graph_id="B"),
+        )
+
+    asyncio.run(run_all())
+
+    assert order == ["start-A", "end-A", "start-B", "end-B"] or order == [
+        "start-B",
+        "end-B",
+        "start-A",
+        "end-A",
+    ]
+
+
+def test_payload_propagation_between_nodes() -> None:
+    registry = FunctionRegistry()
+
+    def start_handler(_: object) -> dict[str, object]:
+        return {"numbers": [1, 2], "meta": {"source": "start"}}
+
+    def transform_handler(payload: dict[str, object]) -> dict[str, object]:
+        numbers = payload.get("numbers", [])
+        items = numbers if isinstance(numbers, list) else []
+        doubled = [int(value) * 2 for value in items]
+        meta = payload.get("meta", {})
+        meta_copy = dict(cast(dict[str, object], meta))
+        meta_copy["transformed"] = True
+        return {"numbers": doubled, "meta": meta_copy}
+
+    def final_handler(payload: dict[str, object]) -> list[int]:
+        numbers = payload.get("numbers", [])
+        return cast(list[int], numbers)
+
+    registry.register("start", start_handler)
+    registry.register("transform", transform_handler)
+    registry.register("final", final_handler)
+
+    graph = Graph(
+        nodes={
+            "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+            "transform": Node(id="transform", kind=NodeKind.TASK, handler="transform"),
+            "final": Node(id="final", kind=NodeKind.TASK, handler="final"),
+        },
+        edges={
+            "start->transform": Edge(id="start->transform", source="start", target="transform"),
+            "transform->final": Edge(id="transform->final", source="transform", target="final"),
+        },
+    )
+
+    scheduler = Scheduler(registry, EventBus(), PrioritySemaphorePolicy(limit=1))
+    results = asyncio.run(scheduler.run(graph, initial_payload=None))
+
+    assert results["final"] == [2, 4]
