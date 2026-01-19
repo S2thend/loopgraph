@@ -25,3 +25,11 @@ coverage.xml
 
 # macOS
 .DS_Store
+
+# Logs
+devsop.md
+design_docs
+
+# Tool caches
+.ruff_cache/
+.mypy_cache/

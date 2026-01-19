@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eventflow2"
-version = "0.1.0"
+version = "0.2.0"
 description = "Asynchronous graph-driven workflow engine."
 authors = [
   { name = "EventFlow2 Team" }

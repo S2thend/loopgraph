@@ -1,5 +1,5 @@
 """Event bus implementations."""
 
-from .eventbus import Event, EventBus
+from .eventbus import ErrorHandler, Event, EventBus, EventListener
 
-__all__ = ["Event", "EventBus"]
+__all__ = ["ErrorHandler", "Event", "EventBus", "EventListener"]

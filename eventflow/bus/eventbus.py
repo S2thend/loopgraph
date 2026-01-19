@@ -16,6 +16,7 @@ from .._debug import (
 from ..core.types import EventType, NodeStatus
 
 EventListener = Callable[["Event"], Coroutine[Any, Any, None]]
+ErrorHandler = Callable[[Exception, "Event"], Coroutine[Any, Any, None]]
 
 
 @dataclass(frozen=True)
@@ -67,11 +68,20 @@ class EventBus:
     ['evt']
     """
 
-    def __init__(self) -> None:
+    def __init__(self, on_error: Optional[ErrorHandler] = None) -> None:
+        """Initialize the event bus.
+
+        Args:
+            on_error: Optional async callback invoked when a listener raises an exception.
+                      Signature: async def handler(exc: Exception, event: Event) -> None
+                      If on_error itself raises, the exception propagates to the caller.
+        """
         func_name = "EventBus.__init__"
-        log_parameter(func_name)
+        log_parameter(func_name, on_error=on_error)
         self._listeners: Dict[Optional[EventType], List[EventListener]] = {}
+        self._on_error = on_error
         log_variable_change(func_name, "self._listeners", self._listeners)
+        log_variable_change(func_name, "self._on_error", self._on_error)
 
     def subscribe(
         self,
@@ -119,6 +129,10 @@ class EventBus:
     async def emit(self, event: Event) -> List[Any]:
         """Emit an event to all registered listeners.
 
+        If a listener raises an exception and an on_error handler is configured,
+        the handler is invoked with the exception and event. If on_error raises,
+        the exception propagates to the caller.
+
         >>> async def demo():
         ...     bus = EventBus()
         ...     events: List[str] = []
@@ -161,4 +175,12 @@ class EventBus:
             log_variable_change(func_name, "tasks", list(tasks))
         results = await asyncio.gather(*tasks, return_exceptions=True)
         log_variable_change(func_name, "results", results)
+
+        # Invoke on_error handler for any exceptions
+        if self._on_error is not None:
+            for result in results:
+                if isinstance(result, Exception):
+                    log_branch(func_name, "on_error_invoked")
+                    await self._on_error(result, event)
+
         return results
