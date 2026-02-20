@@ -4,12 +4,12 @@ EventFlow2 is an asynchronous workflow engine experiment driven by immutable gra
 
 ## Design Principles
 
-- Keep the core compact. Nodes stay stateless and the scheduler stays simple. Handlers capture their own context (event bus, metrics, side effects) so the framework never grows
-special cases for custom behaviour.
+- Keep the core compact. Nodes stay stateless and the scheduler stays simple, with minimum opinionated design and maximum freedom for users to compose their own workflow patterns.
+  Handlers capture their own context (event bus, metrics, side effects) so the framework never grows special cases for custom behaviour.
 - Push heavy lifting to the edge. Long-running work should run via remote APIs, threads, or separate nodes/clusters. We avoid building a distributed fan-out scheduler; users
 orchestrate their own parallelism while the engine focuses on deterministic single-node execution.
-- Flexible aggregation semantics. Aggregator nodes may proceed when only a subset of upstream nodes finish—as long as those nodes reach a complete state. Both success and failure
-count as completion, leaving tolerance policy to the workflow designer.
+- Flexible aggregation semantics. Aggregator nodes may proceed when only a subset of upstream nodes finish—as long as those nodes reach a terminal state.
+  Fail-fast and error-tolerance are user-level workflow patterns, and the engine stays policy-light so users can implement either.
 - Retries live with handlers. The framework doesn’t implement automatic retries. Each handler decides whether to retry, abort, or compensate, keeping recovery logic close to the
 business code.
 - Pluggable concurrency. A shared ConcurrencyManager (semaphore or priority-aware) controls global slots. Multiple schedulers can share one manager, but there’s no hidden magic—
