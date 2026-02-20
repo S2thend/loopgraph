@@ -163,6 +163,10 @@ Examples of foundational tasks (adjust based on your project):
           return values, variable changes, branch/loop signals)
 - [ ] TXXX Verify debug tracing is disabled/stripped for release packaging
 - [ ] TXXX Verify observability identifiers/events remain diagnosable
+- [ ] TXXX Verify loop re-entry paths respect `max_visits` enforcement and
+          visit-count tracking (Principle XIV)
+- [ ] TXXX Verify listener/handler errors are not silently discarded; confirm
+          `EventBus` error callback routing works for affected paths (Principle XV)
 - [ ] TXXX Security hardening
 - [ ] TXXX Run quickstart.md validation
 

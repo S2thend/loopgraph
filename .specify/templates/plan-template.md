@@ -59,6 +59,12 @@
       interfaces/protocols and avoids circular dependencies.
 - [ ] **Compatibility First**: Plan avoids unnecessary dependencies and includes
       migration/deprecation notes for public behavior changes.
+- [ ] **Bounded Loop Semantics**: Plan preserves visit-count tracking and
+      `max_visits` enforcement for loop re-entry paths. Nodes targeted by
+      back-edges are suggested to declare explicit `max_visits`.
+- [ ] **Explicit Error Propagation**: Plan ensures listener and handler errors
+      are never silently discarded; `EventBus` error callback routing and
+      observable failure signals are preserved or extended.
 - [ ] **Quality Gates**: Plan includes test coverage, `ruff check`, mypy checks,
       and docs/spec sync when execution semantics change.
 

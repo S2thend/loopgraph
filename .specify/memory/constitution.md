@@ -1,15 +1,25 @@
 <!--
 Sync Impact Report
 ===================
-Version change: 1.4.1 → 1.4.2
-Modified principles: none (follow-up template propagation only)
-Added sections: none
+Version change: 1.4.2 → 1.5.0
+Modified principles:
+  - IX. Typing-First API Contract: added explicit py.typed marker requirement
+  - VIII. Debug Traceability: no text change (constraint refinement below)
+Added sections:
+  - XIV. Bounded Loop Semantics (new principle)
+  - XV. Explicit Error Propagation (new principle)
 Removed sections: none
+Technical Constraints changes:
+  - Debug logging release policy: specified logging.getLogger gating mechanism
+Development Workflow changes:
+  - Branch naming scoped to feature branches; hotfix/release exempt
+Governance changes:
+  - Added spec Constitution Alignment to compliance review expectations
 Templates requiring updates:
-  - .specify/templates/plan-template.md ✅ updated
-  - .specify/templates/spec-template.md ✅ updated
-  - .specify/templates/tasks-template.md ✅ updated
-  - .specify/templates/commands/*.md N/A (directory not present in this repository)
+  - .specify/templates/plan-template.md ✅ updated (added XIV, XV to Constitution Check)
+  - .specify/templates/spec-template.md ✅ already aligned
+  - .specify/templates/tasks-template.md ✅ updated (added XIV, XV quality tasks)
+  - .specify/templates/commands/*.md N/A (directory not present)
 Follow-up TODOs: none
 -->
 
@@ -107,8 +117,9 @@ behavior stable and policy surface minimal.
 ### IX. Typing-First API Contract
 
 Public APIs MUST provide complete type annotations and preserve PEP 561 typing
-support (`py.typed`). Changes to `eventflow/` MUST pass repository type-check
-configuration before merge.
+support. The `py.typed` marker file MUST be present in the published package.
+Changes to `eventflow/` MUST pass repository type-check configuration before
+merge.
 
 Rationale: strong typing improves correctness while keeping integration behavior
 predictable.
@@ -147,6 +158,28 @@ deprecation or migration guidance when behavior changes.
 Rationale: compatibility-first design keeps EventFlow deployable across diverse
 environments.
 
+### XIV. Bounded Loop Semantics
+
+The scheduler MUST track visit counts for every node and MUST NOT re-schedule a
+node whose visit count has reached its `max_visits` limit. Nodes targeted by
+back-edges are SUGGESTED to declare an explicit `max_visits` to ensure
+deterministic termination. When `max_visits` is not set, the scheduler MUST apply
+its default termination policy.
+
+Rationale: deterministic termination prevents runaway workflows and makes loop
+behavior inspectable and testable.
+
+### XV. Explicit Error Propagation
+
+Listener and handler errors MUST NOT be silently discarded. The `EventBus` MUST
+route listener exceptions through an explicit error callback when configured.
+Unhandled listener failures in the absence of an error callback MUST be logged at
+warning level or above. Framework components MUST NOT catch-and-suppress
+exceptions without providing an observable signal.
+
+Rationale: silent error swallowing hides failures and undermines the
+observability guarantees of Principle XI.
+
 ## Technical Constraints
 
 - **Language**: Python 3.10+ (`pyproject.toml` `requires-python`).
@@ -166,8 +199,10 @@ environments.
 - **Diagnostic instrumentation**: Non-trivial control flow changes in runtime
   modules MUST use `eventflow._debug` logging helpers
   (`log_parameter`, `log_variable_change`, `log_branch`, `log_loop_iteration`).
-- **Debug logging release policy**: Development debug traces MUST be
-  configurable and disabled by default in production/release execution.
+- **Debug logging release policy**: Development debug traces MUST be gated by
+  `logging.getLogger` level configuration and MUST be disabled by default (level
+  above DEBUG). Debug instrumentation MUST NOT require compile-time removal or
+  code stripping for production use.
 - **Handler-owned retries/compensation**: The framework MUST NOT add implicit
   retry/backoff policies; retry and compensation logic MUST remain in user
   workflow logic and handlers.
@@ -182,8 +217,9 @@ environments.
   affected docs and specs in the same change set (minimum: `README.md` plus
   impacted `docs/` or `specs/` files).
 - **Review and branch policy**: Changes under `eventflow/` MUST be reviewed
-  before merge and developed on numbered feature branches matching
-  `^[0-9]{3}-...`, consistent with `.specify/scripts/bash/common.sh`.
+  before merge. Feature branches MUST follow the numbered pattern
+  `^[0-9]{3}-...` consistent with `.specify/scripts/bash/common.sh`. Hotfix and
+  release branches are exempt from this naming convention.
 
 ## Governance
 
@@ -212,9 +248,12 @@ constitution, this document takes precedence.
 
 - Every implementation plan MUST include a Constitution Check against all core
   principles.
+- Every feature specification MUST include a Constitution Alignment section
+  addressing core boundary, execution semantics, failure strategy, concurrency,
+  recovery, debug logging, typing, and validation impacts.
 - Every tasks list MUST include constitution-required quality tasks
   (tests, lint/type checks, and documentation sync when semantics change),
   including user-defined failure-pattern tests where applicable.
 - Every pull request MUST state how constitution compliance was validated.
 
-**Version**: 1.4.2 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-16
+**Version**: 1.5.0 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-20
