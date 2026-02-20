@@ -1,23 +1,23 @@
 <!--
 Sync Impact Report
 ===================
-Version change: 1.5.0 → 1.5.1
+Version change: 1.5.1 → 1.5.2
 Modified principles:
-  - XIV. Bounded Loop Semantics: relaxed default termination from MUST to SHOULD;
-    permitted intentionally unbounded loops where handler controls exit;
-    scoped to single-loop topologies; multi-loop shared nodes explicitly OUT OF
-    SCOPE with PENDING/RUNNING back-edge target as runtime error
+  - I. Compact Core: clarified strict scope to core graph execution engine
+    logic and explicit Occam's razor decision rule for rejecting out-of-scope
+    complexity
 Removed sections: none
 Added sections: none
-Technical Constraints changes: none
+Technical Constraints changes:
+  - Added explicit Occam scope gate for core scheduler changes
 Development Workflow changes: none
 Governance changes: none
 Templates requiring updates:
-  - No template changes required (principle wording only, no structural change)
+  - No template changes required (principle/constraint clarification)
 Follow-up TODOs: none
 
-Previous sync (1.4.2 → 1.5.0):
-  Modified: IX, VIII; Added: XIV, XV; Constraints: debug logging; Workflow: branch naming; Governance: spec alignment
+Previous sync (1.5.0 → 1.5.1):
+  Modified: XIV; Constraints: none; Workflow: none; Governance: none
 -->
 
 # EventFlow2 Constitution
@@ -32,10 +32,16 @@ and state/event persistence. Domain-specific behavior (metrics, retries, side
 effects, remote orchestration) MUST live in handlers or external services. Any
 proposal to expand core modules MUST first show why the behavior cannot be
 composed outside `eventflow/core` and `eventflow/scheduler`. Core APIs MUST stay
-minimally opinionated to maximize user freedom in workflow design.
+minimally opinionated to maximize user freedom in workflow design. EventFlow2's
+core is a graph execution engine; features outside graph execution semantics are
+out of scope unless required for correctness. Design decisions MUST follow
+Occam's razor: choose the smallest correct core behavior and push optional
+policy to handlers or integrations.
 
 Rationale: the less policy built into the engine, the more predictable and
-resilient the platform remains across diverse workloads.
+resilient the platform remains across diverse workloads. Keeping core logic
+compact and scope-disciplined maximizes long-term flexibility for user-level
+composition.
 
 ### II. Edge-Heavy Work
 
@@ -214,6 +220,9 @@ observability guarantees of Principle XI.
 - **Handler-owned retries/compensation**: The framework MUST NOT add implicit
   retry/backoff policies; retry and compensation logic MUST remain in user
   workflow logic and handlers.
+- **Occam scope gate**: Core scheduler changes MUST prefer the smallest correct
+  graph-execution behavior; optional domain policy and out-of-scope orchestration
+  logic MUST be implemented in handlers, integrations, or external services.
 
 ## Development Workflow
 
@@ -264,4 +273,4 @@ constitution, this document takes precedence.
   including user-defined failure-pattern tests where applicable.
 - Every pull request MUST state how constitution compliance was validated.
 
-**Version**: 1.5.1 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-20
+**Version**: 1.5.2 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-20
