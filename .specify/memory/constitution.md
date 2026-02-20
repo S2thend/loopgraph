@@ -1,26 +1,23 @@
 <!--
 Sync Impact Report
 ===================
-Version change: 1.4.2 → 1.5.0
+Version change: 1.5.0 → 1.5.1
 Modified principles:
-  - IX. Typing-First API Contract: added explicit py.typed marker requirement
-  - VIII. Debug Traceability: no text change (constraint refinement below)
-Added sections:
-  - XIV. Bounded Loop Semantics (new principle)
-  - XV. Explicit Error Propagation (new principle)
+  - XIV. Bounded Loop Semantics: relaxed default termination from MUST to SHOULD;
+    permitted intentionally unbounded loops where handler controls exit;
+    scoped to single-loop topologies; multi-loop shared nodes explicitly OUT OF
+    SCOPE with PENDING/RUNNING back-edge target as runtime error
 Removed sections: none
-Technical Constraints changes:
-  - Debug logging release policy: specified logging.getLogger gating mechanism
-Development Workflow changes:
-  - Branch naming scoped to feature branches; hotfix/release exempt
-Governance changes:
-  - Added spec Constitution Alignment to compliance review expectations
+Added sections: none
+Technical Constraints changes: none
+Development Workflow changes: none
+Governance changes: none
 Templates requiring updates:
-  - .specify/templates/plan-template.md ✅ updated (added XIV, XV to Constitution Check)
-  - .specify/templates/spec-template.md ✅ already aligned
-  - .specify/templates/tasks-template.md ✅ updated (added XIV, XV quality tasks)
-  - .specify/templates/commands/*.md N/A (directory not present)
+  - No template changes required (principle wording only, no structural change)
 Follow-up TODOs: none
+
+Previous sync (1.4.2 → 1.5.0):
+  Modified: IX, VIII; Added: XIV, XV; Constraints: debug logging; Workflow: branch naming; Governance: spec alignment
 -->
 
 # EventFlow2 Constitution
@@ -163,11 +160,22 @@ environments.
 The scheduler MUST track visit counts for every node and MUST NOT re-schedule a
 node whose visit count has reached its `max_visits` limit. Nodes targeted by
 back-edges are SUGGESTED to declare an explicit `max_visits` to ensure
-deterministic termination. When `max_visits` is not set, the scheduler MUST apply
-its default termination policy.
+deterministic termination. When `max_visits` is not set, the scheduler SHOULD
+declare an explicit termination strategy; omitting one is permitted for
+intentionally unbounded loops (e.g., a primary agent loop) where the handler
+controls exit. The scheduler MUST support single-loop topologies (one cycle of
+any length). Multiple loops that share nodes are explicitly OUT OF SCOPE; graph
+construction MUST reject graphs containing multi-loop shared nodes before
+execution begins. The scheduler MUST additionally raise a runtime error if a
+back-edge targets a node in a non-terminal state (PENDING or RUNNING) as a
+defensive fallback.
 
 Rationale: deterministic termination prevents runaway workflows and makes loop
-behavior inspectable and testable.
+behavior inspectable and testable, while allowing intentionally unbounded loops
+where the handler owns the exit decision. Single-loop scoping avoids the
+state-ownership conflicts inherent in multi-loop shared nodes — each node in a
+single loop has exactly one execution path, so back-edge re-entry never
+encounters concurrent state contention.
 
 ### XV. Explicit Error Propagation
 
@@ -256,4 +264,4 @@ constitution, this document takes precedence.
   including user-defined failure-pattern tests where applicable.
 - Every pull request MUST state how constitution compliance was validated.
 
-**Version**: 1.5.0 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-20
+**Version**: 1.5.1 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-20
