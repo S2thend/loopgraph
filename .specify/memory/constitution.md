@@ -1,23 +1,22 @@
 <!--
 Sync Impact Report
 ===================
-Version change: 1.5.1 → 1.5.2
+Version change: 1.5.2 → 1.5.3
 Modified principles:
-  - I. Compact Core: clarified strict scope to core graph execution engine
-    logic and explicit Occam's razor decision rule for rejecting out-of-scope
-    complexity
+  - XIV. Bounded Loop Semantics: clarified loop-topology scope to allow
+    multiple disjoint loops while still rejecting shared-node multi-loop graphs;
+    removed runtime hard-stop mandate for non-terminal back-edge targets
 Removed sections: none
 Added sections: none
-Technical Constraints changes:
-  - Added explicit Occam scope gate for core scheduler changes
+Technical Constraints changes: none
 Development Workflow changes: none
 Governance changes: none
 Templates requiring updates:
-  - No template changes required (principle/constraint clarification)
+  - No template changes required (principle clarification)
 Follow-up TODOs: none
 
-Previous sync (1.5.0 → 1.5.1):
-  Modified: XIV; Constraints: none; Workflow: none; Governance: none
+Previous sync (1.5.1 → 1.5.2):
+  Modified: I; Constraints: Occam scope gate; Workflow: none; Governance: none
 -->
 
 # EventFlow2 Constitution
@@ -169,19 +168,16 @@ back-edges are SUGGESTED to declare an explicit `max_visits` to ensure
 deterministic termination. When `max_visits` is not set, the scheduler SHOULD
 declare an explicit termination strategy; omitting one is permitted for
 intentionally unbounded loops (e.g., a primary agent loop) where the handler
-controls exit. The scheduler MUST support single-loop topologies (one cycle of
-any length). Multiple loops that share nodes are explicitly OUT OF SCOPE; graph
-construction MUST reject graphs containing multi-loop shared nodes before
-execution begins. The scheduler MUST additionally raise a runtime error if a
-back-edge targets a node in a non-terminal state (PENDING or RUNNING) as a
-defensive fallback.
+controls exit. The scheduler MUST support loop topologies of any cycle length
+and MAY include multiple disjoint loops in the same graph. Multiple loops that
+share nodes are explicitly OUT OF SCOPE; graph construction MUST reject graphs
+containing shared-node multi-loop topologies before execution begins.
 
 Rationale: deterministic termination prevents runaway workflows and makes loop
 behavior inspectable and testable, while allowing intentionally unbounded loops
-where the handler owns the exit decision. Single-loop scoping avoids the
-state-ownership conflicts inherent in multi-loop shared nodes — each node in a
-single loop has exactly one execution path, so back-edge re-entry never
-encounters concurrent state contention.
+where the handler owns the exit decision. Allowing disjoint loops preserves
+expressiveness without adding state-ownership conflicts; rejecting shared-node
+multi-loop topologies avoids ambiguous re-entry ownership and contention.
 
 ### XV. Explicit Error Propagation
 
@@ -273,4 +269,4 @@ constitution, this document takes precedence.
   including user-defined failure-pattern tests where applicable.
 - Every pull request MUST state how constitution compliance was validated.
 
-**Version**: 1.5.2 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-20
+**Version**: 1.5.3 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-20

@@ -55,11 +55,11 @@ documentation examples are touched.
 
 - [ ] T006 [P] [US1] Integration test `test_scheduler_bounded_loop_reentry` in `tests/test_integration_workflows.py`: graph with `start → loop_body (max_visits=3, allow_partial_upstream=True) → switch → loop_body (route="continue") / output (route="done")`. Switch handler returns "continue" while visits < max. Assert: loop_body runs 3 times, output runs once, results correct.
 - [ ] T007 [P] [US1] Integration test `test_scheduler_loop_max_visits_1` in `tests/test_integration_workflows.py`: loop_body with `max_visits=1`. Assert: loop_body runs once, exit route taken immediately on back-edge.
-- [ ] T008 [P] [US1] Integration test `test_scheduler_reentry_pending_running_hard_stop` in `tests/test_integration_workflows.py`: verify scheduler raises `RuntimeError` if back-edge targets a node in PENDING or RUNNING state (defensive assertion).
+- [ ] T008 [P] [US1] Integration test `test_scheduler_disjoint_loops_execute` in `tests/test_integration_workflows.py`: construct a graph with two disjoint loops, ensure graph validation passes, and assert both loop segments execute without loop-topology errors.
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] Modify `_execute_node` in `eventflow/scheduler/scheduler.py` to detect re-entry targets after downstream edge processing (line 267-272). For each selected edge target: if target status is COMPLETED or FAILED and has remaining visits, call `reset_for_reentry`. If target is PENDING or RUNNING, raise `RuntimeError`. Return `Tuple[Any, List[str]]` (handler result + re-entry node IDs). Include `eventflow._debug` logging for re-entry detection.
+- [ ] T009 [US1] Modify `_execute_node` in `eventflow/scheduler/scheduler.py` to detect re-entry targets after downstream edge processing (line 267-272). For each selected edge target: if target status is COMPLETED and has remaining visits, call `reset_for_reentry`; otherwise do not apply re-entry reset. Return `Tuple[Any, List[str]]` (handler result + re-entry node IDs). Include `eventflow._debug` logging for re-entry detection.
 - [ ] T010 [US1] Modify `run()` in `eventflow/scheduler/scheduler.py` to unpack `_execute_node` return value as `handler_result, reentry_targets`. After `pending.remove(node_id)`, add `pending.add(target)` for each re-entry target. Include `eventflow._debug` logging for re-queue.
 - [ ] T011 [US1] Update existing `test_loop_respects_max_visits` in `tests/test_integration_workflows.py`: replace manual state reset (lines 183-185) with `state.reset_for_reentry("loop")` to validate the new method integrates with existing test patterns.
 
@@ -117,6 +117,8 @@ No additional code changes needed — `mark_complete` already increments `visits
 - [ ] T021 Verify `eventflow._debug` traces: review `reset_for_reentry`, re-entry detection in `_execute_node`, and cycle detection in `validate()` all use `log_parameter`, `log_variable_change`, `log_branch` consistently
 - [ ] T022 Verify `max_visits` enforcement: confirm visit counts accumulate across re-entries and exhausted nodes take exit route (Principle XIV)
 - [ ] T023 Verify fail-fast behavior: confirm handler exceptions still emit `NODE_FAILED` and abort `Scheduler.run()` (Principle XV)
+- [ ] T024 Verify zero-runtime-dependency NFR: confirm `[project.dependencies]` remains unchanged (no new runtime deps)
+- [ ] T025 Verify steady-state scheduler-overhead NFR: confirm no new graph-wide traversal is added to `Scheduler.run()`/`_execute_node` (topology analysis remains in `Graph.validate()`)
 
 ---
 
@@ -149,7 +151,7 @@ No additional code changes needed — `mark_complete` already increments `visits
 - T004 and T005 can run in parallel (independent test targets)
 - T006, T007, T008 can run in parallel (independent test cases, all in same file but no dependencies)
 - T012 can run in parallel with T013, T014 (different test focus areas)
-- T015, T016, T017, T018, T019 can all run in parallel (independent quality gates)
+- T015, T016, T017, T018, T019, T024, T025 can all run in parallel (independent quality gates)
 
 ---
 

@@ -50,7 +50,7 @@ Each function includes doctest examples; the `tests/test_doctests.py` suite ensu
 - Re-entry is triggered only by a `SWITCH` back-edge selection.
 - Back-edge reset is allowed only for `COMPLETED` targets.
 - Reset moves target state back to `PENDING`, clears upstream-completion tracking, and preserves cumulative `visit_count`.
-- If a selected back-edge target is `PENDING` or `RUNNING`, scheduler execution hard-stops with an explicit error.
+- If a selected back-edge target is not `COMPLETED`, re-entry reset is not applied.
 - Handler exceptions keep existing fail-fast behavior: emit `NODE_FAILED`, persist state, and re-raise.
 - Loop cycles of arbitrary length are supported, including multiple disjoint loops.
 - Multiple loops sharing any node are explicitly disallowed and rejected during graph construction/validation.

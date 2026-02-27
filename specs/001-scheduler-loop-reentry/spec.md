@@ -10,10 +10,13 @@
 ### Session 2026-02-20
 
 - Q: What loop topology must this feature guarantee as in-scope for this iteration? → A: Support loop cycles of arbitrary length and allow multiple disjoint loops; explicitly disallow multiple loops sharing nodes.
-- Q: If a SWITCH back-edge targets a node that is not COMPLETED (PENDING/RUNNING/FAILED), what should the scheduler do? → A: Keep re-entry scoped to COMPLETED targets, hard-stop with an error for non-terminal targets (PENDING or RUNNING), and explicitly disallow multiple loops that share nodes.
+- Q: If a SWITCH back-edge targets a node that is not COMPLETED (PENDING/RUNNING/FAILED), what should the scheduler do? → A: Keep re-entry scoped to COMPLETED targets only; non-COMPLETED targets are not reset by re-entry logic.
 - Q: Should loop execution continue after a handler exception, or remain fail-fast? → A: Keep current fail-fast behavior in core; handler exceptions emit `NODE_FAILED` and abort `Scheduler.run()`. Error-tolerant flows are implemented by user handlers.
 - Q: Where should we enforce the rule that multiple loops sharing nodes are disallowed? → A: Enforce during graph construction/validation, before `Scheduler.run()`.
 - Q: Should the graph allow multiple loops when they are disjoint? → A: Allow multiple disjoint loops; reject only loops that share nodes.
+- Q: Should existing tests remain unmodified to claim backward compatibility? → A: Existing behavior coverage must stay green, but test updates/refactors are allowed when adapting assertions to new loop semantics.
+- Q: Should loop-topology enforcement also add a runtime hard-stop fallback in scheduler execution? → A: No. Enforce topology at graph construction/validation only.
+- Q: How explicit should non-functional requirements be for this feature? → A: Add minimal explicit NFRs for compatibility, dependency footprint, and no extra steady-state scheduler graph-scan overhead.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -67,7 +70,7 @@ A workflow operator monitors loop progress through the event log. Each time a lo
 - What happens when a node fails during loop execution? Existing fail-fast behavior remains: the scheduler emits `NODE_FAILED` and raises, so no automatic back-edge re-entry is attempted for FAILED nodes in the same run.
 - What happens when a back-edge targets a node with `max_visits=1`? The node executes once during its initial scheduling; when the back-edge fires, the node has already exhausted its visits so the exit route is taken immediately.
 - What happens when a SWITCH node has a back-edge to itself? This is a degenerate case. The SWITCH node would need `allow_partial_upstream=True` and its own `max_visits` to avoid infinite self-recursion.
-- What happens when a back-edge targets a node currently in PENDING or RUNNING? The scheduler raises an error immediately (hard stop) because non-terminal re-entry indicates an invalid concurrent loop topology.
+- What happens when a back-edge targets a node currently in PENDING, RUNNING, or FAILED? Re-entry reset does not apply because this feature scopes reset to COMPLETED targets only.
 - What happens when multiple loops share one or more nodes? This topology is out of scope and must be rejected during graph construction/validation before execution begins.
 
 ## Requirements *(mandatory)*
@@ -83,9 +86,15 @@ A workflow operator monitors loop progress through the event log. Each time a lo
 - **FR-007**: The re-entry reset MUST preserve snapshot/restore compatibility. A snapshot taken after a re-entry reset MUST correctly restore to the reset state.
 - **FR-008**: `NODE_COMPLETED` events emitted after re-entry executions MUST carry the correct cumulative `visit_count`.
 - **FR-009**: Re-entry behavior MUST support loop cycles of arbitrary length formed by SWITCH back-edges (not only self-loops or two-node loops), including multiple disjoint loops, while preserving `max_visits` and route-based exit semantics.
-- **FR-010**: If a selected back-edge target is non-terminal (`PENDING` or `RUNNING`), the scheduler MUST raise an explicit runtime error and stop execution.
-- **FR-011**: Graph topologies containing multiple loops that share one or more nodes MUST be rejected during graph construction/validation (before `Scheduler.run()`).
+- **FR-010**: Re-entry reset MUST apply only to selected back-edge targets currently in `COMPLETED` state; `FAILED`, `PENDING`, and `RUNNING` targets MUST NOT be reset by re-entry logic.
+- **FR-011**: Graph topologies containing multiple loops that share one or more nodes MUST be rejected during graph construction/validation (before `Scheduler.run()`), while multiple disjoint loops remain valid.
 - **FR-012**: Handler failure behavior MUST remain fail-fast for this feature: on handler exception, the scheduler emits `NODE_FAILED`, persists state, and re-raises without introducing new core-level failure-mode switches.
+
+### Non-Functional Requirements
+
+- **NFR-001 (Compatibility)**: The feature MUST preserve Python 3.10+ runtime compatibility and repository typing expectations (PEP 561/mypy gates unchanged).
+- **NFR-002 (Dependency Footprint)**: The feature MUST NOT introduce new runtime dependencies.
+- **NFR-003 (Steady-State Scheduler Overhead)**: The feature MUST NOT introduce additional full-graph traversal in steady-state scheduling loops; cycle/topology analysis belongs in graph construction/validation.
 
 ### Key Entities
 
@@ -97,7 +106,7 @@ A workflow operator monitors loop progress through the event log. Each time a lo
 
 - **Core Boundary**: This feature modifies `ExecutionState` (adding `reset_for_reentry`) and `Scheduler` (re-entry logic after downstream edge selection). These changes are justified because re-entry is a scheduling primitive — it determines when a node becomes eligible for execution — which is squarely within the scheduler's responsibility for "dependency resolution, handler dispatch, and state/event persistence" (Principle I). The behavior cannot be composed outside core without duplicating internal scheduling state management.
 
-- **Execution Semantics Impact**: Node readiness semantics change: a `COMPLETED` node can now transition back to `PENDING` via `reset_for_reentry`, making it eligible for `is_ready()` again. The existing `max_visits` check in `is_ready()` and `_has_remaining_visits()` continues to enforce the upper bound. If a selected back-edge target is already `PENDING` or `RUNNING`, the scheduler hard-stops with an explicit error. SWITCH routing, AGGREGATE readiness, and default edge selection are otherwise unaffected.
+- **Execution Semantics Impact**: Node readiness semantics change: a `COMPLETED` node can now transition back to `PENDING` via `reset_for_reentry`, making it eligible for `is_ready()` again. The existing `max_visits` check in `is_ready()` and `_has_remaining_visits()` continues to enforce the upper bound. Re-entry reset is not applied to non-`COMPLETED` targets. SWITCH routing, AGGREGATE readiness, and default edge selection are otherwise unaffected.
 
 - **Failure and Retry Strategy**: Existing fail-fast behavior remains unchanged: when a handler raises, the scheduler emits `NODE_FAILED` and re-raises the exception. This preserves Principle IV by keeping retry/error-tolerance policies in user handlers and workflow logic rather than adding new core-level failure strategy switches.
 
@@ -116,9 +125,12 @@ A workflow operator monitors loop progress through the event log. Each time a lo
   - Integration test (bounded): `Scheduler.run()` with a back-edge graph and `max_visits=N` executes the loop body exactly N times.
   - Integration test (unbounded): `Scheduler.run()` with `max_visits=None` and handler-controlled exit executes the expected number of iterations.
   - Regression test (failure path): handler exceptions still emit `NODE_FAILED`, persist snapshot, and abort `Scheduler.run()` (unchanged fail-fast behavior).
-  - Integration test (hard stop): selecting a back-edge to a `PENDING` or `RUNNING` target raises an explicit runtime error.
   - Topology validation test: graph construction/validation rejects graphs with multiple loops sharing one or more nodes before `Scheduler.run()`.
   - Topology validation test: graph construction/validation accepts graphs containing multiple disjoint loops.
+  - Integration/behavior test: re-entry reset only occurs for targets in `COMPLETED` state.
+  - NFR compatibility check: `mypy` and full test suite pass with repository configuration on supported Python versions.
+  - NFR dependency check: runtime dependency list remains unchanged.
+  - NFR overhead check: code review/test assertions confirm no additional graph-wide scan is added to steady-state scheduler loop.
   - Event observability test: `visit_count` on `NODE_COMPLETED` events is correct across re-entries.
   - Doctest: `reset_for_reentry` includes a docstring with executable example.
   - Doctest gate: `python -m pytest --doctest-modules eventflow/core/state.py` passes.
@@ -132,9 +144,10 @@ A workflow operator monitors loop progress through the event log. Each time a lo
 
 - **SC-001**: A bounded loop graph with `max_visits=N` completes with the loop body executing exactly N times, verified by event log inspection — no manual state resets required.
 - **SC-002**: An unbounded loop graph with `max_visits=None` completes with the loop body executing exactly the number of times the handler signals "continue", verified by event log inspection.
-- **SC-003**: All existing scheduler tests continue to pass without modification, confirming backward compatibility.
+- **SC-003**: Existing scheduler behavior coverage remains green after introducing loop re-entry, with test updates/refactors allowed where assertions need to align with new semantics.
 - **SC-004**: `visit_count` on `NODE_COMPLETED` events accurately reflects cumulative executions across re-entries, verified by event bus subscription in tests.
 - **SC-005**: Snapshot taken mid-loop correctly restores and resumes execution from the interrupted iteration, verified by a snapshot round-trip test.
 - **SC-006**: Failure-path behavior remains unchanged: on handler exception the scheduler emits `NODE_FAILED` and aborts execution.
 - **SC-007**: A graph containing multiple loops that share nodes is rejected at graph construction/validation with an explicit topology error.
 - **SC-008**: A graph containing multiple disjoint loops passes graph validation and executes without loop-topology errors.
+- **SC-009**: No new runtime dependencies are introduced, and Python 3.10+ compatibility/type-check gates remain passing.

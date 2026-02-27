@@ -7,7 +7,7 @@
 
 Enable the scheduler to re-enter completed nodes via SWITCH back-edges by
 resetting them to PENDING, bounded by `max_visits`. Adds graph-level topology
-validation (reject shared-node multi-loop graphs), a `reset_for_reentry` method
+validation (reject shared-node multi-loop graphs while allowing disjoint loops), a `reset_for_reentry` method
 on `ExecutionState`, and re-entry logic in `Scheduler._execute_node` / `run()`.
 
 ## Technical Context
@@ -18,7 +18,7 @@ on `ExecutionState`, and re-entry logic in `Scheduler._execute_node` / `run()`.
 **Testing**: pytest + pytest-asyncio
 **Target Platform**: Any Python 3.10+ runtime
 **Project Type**: Single Python package (`eventflow`)
-**Performance Goals**: N/A (orchestration engine, not compute-bound)
+**Performance Goals**: Preserve steady-state scheduler complexity (no added graph-wide scans in the run loop)
 **Constraints**: Zero runtime deps, async-first API, PEP 561 typing
 
 ## Constitution Check
@@ -37,10 +37,10 @@ on `ExecutionState`, and re-entry logic in `Scheduler._execute_node` / `run()`.
       Re-entry clears `upstream_completed` so readiness is re-evaluated from
       scratch. `allow_partial_upstream` and `max_visits` continue to work as
       before. No global failure strategy is imposed.
-- [x] **Handler-Owned Error Strategy**: No automatic retries introduced. FAILED
-      nodes are eligible for re-entry reset (handler-driven via SWITCH), but the
-      framework does not retry automatically. PENDING/RUNNING targets cause a
-      hard stop.
+- [x] **Handler-Owned Error Strategy**: No automatic retries introduced.
+      Re-entry reset remains scoped to `COMPLETED` targets. Handler exceptions
+      remain fail-fast (`NODE_FAILED` + re-raise), so error-tolerance logic stays
+      in handlers/workflow composition.
 - [x] **Pluggable Concurrency**: Re-entered nodes acquire concurrency slots via
       the same `slot(key, priority)` path. No change to `ConcurrencyManager`.
 - [x] **Snapshot-First Recovery**: `reset_for_reentry` produces snapshot-compatible
@@ -63,10 +63,12 @@ on `ExecutionState`, and re-entry logic in `Scheduler._execute_node` / `run()`.
       internal. No public API breakage. No new runtime dependencies.
 - [x] **Bounded Loop Semantics**: `max_visits` enforcement preserved. Visit counts
       accumulate across re-entries. Graph validation rejects shared-node
-      multi-loop topologies. Runtime hard stop for PENDING/RUNNING back-edge
-      targets as defensive fallback.
+      multi-loop topologies and allows multiple disjoint loops.
 - [x] **Explicit Error Propagation**: Fail-fast behavior unchanged. Handler
       exceptions still emit `NODE_FAILED` and re-raise. No silent suppression.
+- [x] **Minimal NFR Coverage**: Plan preserves Python 3.10+/typing compatibility,
+      introduces zero runtime dependencies, and keeps graph-wide cycle analysis in
+      validation (not in steady-state scheduler loop).
 - [x] **Quality Gates**: Plan includes pytest, ruff check, mypy, doctest gate,
       and docs sync.
 
