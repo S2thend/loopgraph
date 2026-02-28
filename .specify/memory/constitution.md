@@ -1,11 +1,11 @@
 <!--
 Sync Impact Report
 ===================
-Version change: 1.5.2 → 1.5.3
+Version change: 1.5.3 → 1.5.4
 Modified principles:
-  - XIV. Bounded Loop Semantics: clarified loop-topology scope to allow
-    multiple disjoint loops while still rejecting shared-node multi-loop graphs;
-    removed runtime hard-stop mandate for non-terminal back-edge targets
+  - XIV. Bounded Loop Semantics: re-added runtime hard-stop for PENDING/RUNNING
+    back-edge targets as defensive fallback; added SWITCH self-loop rejection
+    at graph validation
 Removed sections: none
 Added sections: none
 Technical Constraints changes: none
@@ -15,8 +15,8 @@ Templates requiring updates:
   - No template changes required (principle clarification)
 Follow-up TODOs: none
 
-Previous sync (1.5.1 → 1.5.2):
-  Modified: I; Constraints: Occam scope gate; Workflow: none; Governance: none
+Previous sync (1.5.2 → 1.5.3):
+  Modified: XIV (disjoint loops, removed runtime hard-stop); Constraints: none
 -->
 
 # EventFlow2 Constitution
@@ -171,13 +171,20 @@ intentionally unbounded loops (e.g., a primary agent loop) where the handler
 controls exit. The scheduler MUST support loop topologies of any cycle length
 and MAY include multiple disjoint loops in the same graph. Multiple loops that
 share nodes are explicitly OUT OF SCOPE; graph construction MUST reject graphs
-containing shared-node multi-loop topologies before execution begins.
+containing shared-node multi-loop topologies before execution begins. SWITCH
+self-loops (a SWITCH node routing back to itself) MUST be rejected at graph
+validation. The scheduler MUST additionally raise a runtime error if a back-edge
+targets a node in a non-terminal state (PENDING or RUNNING) as a defensive
+fallback.
 
 Rationale: deterministic termination prevents runaway workflows and makes loop
 behavior inspectable and testable, while allowing intentionally unbounded loops
 where the handler owns the exit decision. Allowing disjoint loops preserves
 expressiveness without adding state-ownership conflicts; rejecting shared-node
 multi-loop topologies avoids ambiguous re-entry ownership and contention.
+SWITCH self-loops are meaningless (routing without processing) and are rejected
+to prevent degenerate graphs. The runtime hard-stop for non-terminal back-edge
+targets is a defensive fallback for bugs that bypass graph validation.
 
 ### XV. Explicit Error Propagation
 
@@ -269,4 +276,4 @@ constitution, this document takes precedence.
   including user-defined failure-pattern tests where applicable.
 - Every pull request MUST state how constitution compliance was validated.
 
-**Version**: 1.5.3 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-20
+**Version**: 1.5.4 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-28

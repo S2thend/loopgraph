@@ -37,9 +37,9 @@ documentation examples are touched.
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
 - [ ] T002 [P] Add `reset_for_reentry(node_id)` method to `ExecutionState` in `eventflow/core/state.py`. Must: set status to `NodeStatus.PENDING`, clear `upstream_completed`, remove from `_completed_nodes`. Must NOT reset `visits.count`. Include `eventflow._debug` logging (`log_parameter`, `log_variable_change`, `log_branch`). Include docstring with doctest example.
-- [ ] T003 [P] Add shared-node multi-loop validation to `Graph.validate()` in `eventflow/core/graph.py`. Use DFS-based cycle detection on forward adjacency. Find all cycles, check for node intersection across cycles. Raise `ValueError` listing shared nodes if any node appears in more than one cycle. Include `eventflow._debug` logging. Include docstring with doctest example.
+- [ ] T003 [P] Add shared-node multi-loop validation and SWITCH self-loop rejection to `Graph.validate()` in `eventflow/core/graph.py`. Use DFS-based cycle detection on forward adjacency. Find all cycles, check for node intersection across cycles. Raise `ValueError` listing shared nodes if any node appears in more than one cycle. Also reject edges where `source == target` and the source node is `NodeKind.SWITCH` (SWITCH self-loops are meaningless). Include `eventflow._debug` logging. Include docstring with doctest example.
 - [ ] T004 Unit test for `reset_for_reentry` in `tests/test_integration_workflows.py`: verify status reset to PENDING, `upstream_completed` cleared, removed from `_completed_nodes`, `visits.count` preserved. Verify snapshot/restore round-trip after reset.
-- [ ] T005 Unit test for shared-node multi-loop validation in `tests/test_integration_workflows.py`: verify `Graph.validate()` raises `ValueError` for graphs with overlapping cycles. Verify graphs with multiple disjoint loops pass validation. Verify graphs with a single loop of any length pass validation.
+- [ ] T005 Unit test for graph topology validation in `tests/test_integration_workflows.py`: verify `Graph.validate()` raises `ValueError` for graphs with overlapping cycles. Verify graphs with multiple disjoint loops pass validation. Verify graphs with a single loop of any length pass validation. Verify SWITCH self-loop raises `ValueError`. Verify non-SWITCH self-loop passes validation.
 
 **Checkpoint**: Foundation ready — `reset_for_reentry` and graph topology validation are independently testable and proven correct.
 
@@ -56,10 +56,11 @@ documentation examples are touched.
 - [ ] T006 [P] [US1] Integration test `test_scheduler_bounded_loop_reentry` in `tests/test_integration_workflows.py`: graph with `start → loop_body (max_visits=3, allow_partial_upstream=True) → switch → loop_body (route="continue") / output (route="done")`. Switch handler returns "continue" while visits < max. Assert: loop_body runs 3 times, output runs once, results correct.
 - [ ] T007 [P] [US1] Integration test `test_scheduler_loop_max_visits_1` in `tests/test_integration_workflows.py`: loop_body with `max_visits=1`. Assert: loop_body runs once, exit route taken immediately on back-edge.
 - [ ] T008 [P] [US1] Integration test `test_scheduler_disjoint_loops_execute` in `tests/test_integration_workflows.py`: construct a graph with two disjoint loops, ensure graph validation passes, and assert both loop segments execute without loop-topology errors.
+- [ ] T008a [P] [US1] Integration test `test_scheduler_reentry_pending_running_hard_stop` in `tests/test_integration_workflows.py`: verify scheduler raises `RuntimeError` if `_execute_node` encounters a back-edge target in PENDING or RUNNING state (defensive assertion for bugs bypassing graph validation).
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] Modify `_execute_node` in `eventflow/scheduler/scheduler.py` to detect re-entry targets after downstream edge processing (line 267-272). For each selected edge target: if target status is COMPLETED and has remaining visits, call `reset_for_reentry`; otherwise do not apply re-entry reset. Return `Tuple[Any, List[str]]` (handler result + re-entry node IDs). Include `eventflow._debug` logging for re-entry detection.
+- [ ] T009 [US1] Modify `_execute_node` in `eventflow/scheduler/scheduler.py` to detect re-entry targets after downstream edge processing (line 267-272). For each selected edge target: if target status is COMPLETED and has remaining visits, call `reset_for_reentry`. If target is PENDING or RUNNING, raise `RuntimeError` (defensive hard-stop). Otherwise (FAILED), do not reset. Return `Tuple[Any, List[str]]` (handler result + re-entry node IDs). Include `eventflow._debug` logging for re-entry detection.
 - [ ] T010 [US1] Modify `run()` in `eventflow/scheduler/scheduler.py` to unpack `_execute_node` return value as `handler_result, reentry_targets`. After `pending.remove(node_id)`, add `pending.add(target)` for each re-entry target. Include `eventflow._debug` logging for re-queue.
 - [ ] T011 [US1] Update existing `test_loop_respects_max_visits` in `tests/test_integration_workflows.py`: replace manual state reset (lines 183-185) with `state.reset_for_reentry("loop")` to validate the new method integrates with existing test patterns.
 
@@ -94,7 +95,7 @@ No additional code changes needed — the Phase 3 implementation handles `max_vi
 ### Tests for User Story 3 (REQUIRED) ✅
 
 - [ ] T013 [P] [US3] Integration test `test_loop_visit_count_observability` in `tests/test_integration_workflows.py`: run bounded loop graph with `InMemoryEventLog`. Collect `NODE_COMPLETED` events for loop_body node. Assert `visit_count` values are `[1, 2, 3]`.
-- [ ] T014 [P] [US3] Integration test `test_loop_snapshot_resume_visit_count` in `tests/test_integration_workflows.py`: take snapshot after 2 loop iterations, restore from snapshot, continue execution, assert `visit_count` on the resumed `NODE_COMPLETED` event is 3.
+- [ ] T014 [P] [US3] Integration test `test_loop_snapshot_resume_visit_count` in `tests/test_integration_workflows.py`: run a bounded loop graph (max_visits=3) with `InMemorySnapshotStore`, stop after 2 iterations. Create a new `Scheduler` instance with the same snapshot store, call `Scheduler.run()` again, and assert: execution resumes from iteration 3 (not from scratch), `visit_count` on the resumed `NODE_COMPLETED` event is 3, and the exit route fires correctly.
 
 ### Implementation for User Story 3
 
@@ -149,7 +150,7 @@ No additional code changes needed — `mark_complete` already increments `visits
 
 - T002 and T003 can run in parallel (different files: state.py vs graph.py)
 - T004 and T005 can run in parallel (independent test targets)
-- T006, T007, T008 can run in parallel (independent test cases, all in same file but no dependencies)
+- T006, T007, T008, T008a can run in parallel (independent test cases, all in same file but no dependencies)
 - T012 can run in parallel with T013, T014 (different test focus areas)
 - T015, T016, T017, T018, T019, T024, T025 can all run in parallel (independent quality gates)
 
