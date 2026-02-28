@@ -138,6 +138,7 @@ class ExecutionState:
     True
     >>> runtime.mark_running("a")
     >>> runtime.mark_complete("a", event_id="evt-1", outcome=VisitOutcome.success())
+    >>> runtime.note_upstream_completion("b", "a")
     >>> runtime.is_ready(graph, "b")
     True
     >>> agg_graph = Graph(
@@ -232,7 +233,7 @@ class ExecutionState:
         log_variable_change(func_name, "completed_required", completed_required)
         for iteration, upstream in enumerate(upstream_nodes):
             log_loop_iteration(func_name, "upstream_required_check", iteration)
-            if upstream.id not in self._completed_nodes:
+            if upstream.id not in state.upstream_completed:
                 log_branch(func_name, "upstream_missing")
                 completed_required = False
                 log_variable_change(func_name, "completed_required", completed_required)
@@ -251,7 +252,7 @@ class ExecutionState:
             log_variable_change(func_name, "any_completed", any_completed)
             for iteration, upstream in enumerate(upstream_nodes):
                 log_loop_iteration(func_name, "upstream_partial_check", iteration)
-                if upstream.id in self._completed_nodes:
+                if upstream.id in state.upstream_completed:
                     any_completed = True
                     log_variable_change(func_name, "any_completed", any_completed)
                     break
@@ -337,6 +338,41 @@ class ExecutionState:
         log_variable_change(func_name, "state_last_payload", state.last_payload)
         state.visits = state.visits.increment(event_id)
         log_variable_change(func_name, "state_visits", state.visits)
+
+    def reset_for_reentry(self, node_id: str) -> None:
+        """Reset a node to pending so it can be scheduled again.
+
+        >>> runtime = ExecutionState()
+        >>> runtime.mark_complete("node-1", "evt-1", VisitOutcome.success("ok"))
+        >>> before = runtime.snapshot()["states"]["node-1"]["visits"]["count"]
+        >>> runtime.reset_for_reentry("node-1")
+        >>> snapshot = runtime.snapshot()
+        >>> snapshot["states"]["node-1"]["status"]
+        'pending'
+        >>> snapshot["states"]["node-1"]["upstream_completed"]
+        []
+        >>> snapshot["states"]["node-1"]["visits"]["count"] == before
+        True
+        >>> "node-1" in snapshot["completed_nodes"]
+        False
+        """
+        func_name = "ExecutionState.reset_for_reentry"
+        log_parameter(func_name, node_id=node_id)
+        state = self._ensure_state(node_id)
+        log_variable_change(func_name, "state_before", state)
+        state.status = NodeStatus.PENDING
+        log_variable_change(func_name, "state_status", state.status)
+        state.upstream_completed.clear()
+        log_variable_change(
+            func_name, "state_upstream_completed", state.upstream_completed
+        )
+        if node_id in self._completed_nodes:
+            log_branch(func_name, "remove_from_completed")
+            self._completed_nodes.remove(node_id)
+        else:
+            log_branch(func_name, "not_in_completed")
+        log_variable_change(func_name, "self._completed_nodes", self._completed_nodes)
+        log_variable_change(func_name, "state_after", state)
 
     def note_upstream_completion(self, node_id: str, upstream_id: str) -> None:
         """Record that an upstream dependency has completed.
