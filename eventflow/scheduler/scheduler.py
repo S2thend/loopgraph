@@ -70,6 +70,60 @@ class Scheduler:
     ...     }
     >>> asyncio.run(run_with_persistence())
     {'completed': ['branch', 'end', 'start'], 'events': ['NODE_SCHEDULED', 'NODE_COMPLETED', 'NODE_SCHEDULED', 'NODE_COMPLETED', 'NODE_SCHEDULED', 'NODE_COMPLETED']}
+
+    Loop re-entry is supported when a SWITCH routes to an already-completed node
+    that still has visit capacity.
+
+    >>> loop_registry = FunctionRegistry()
+    >>> loop_counter = {"count": 0}
+    >>> def loop_handler(_: object) -> dict[str, int]:
+    ...     loop_counter["count"] += 1
+    ...     return {"iteration": loop_counter["count"]}
+    >>> def switch_handler(payload: dict[str, int]) -> str:
+    ...     if payload["iteration"] < 2:
+    ...         return "continue"
+    ...     return "done"
+    >>> loop_registry.register("start", lambda _: None)
+    >>> loop_registry.register("loop", loop_handler)
+    >>> loop_registry.register("switch", switch_handler)
+    >>> loop_registry.register("out", lambda payload: payload)
+    >>> loop_graph = Graph(
+    ...     nodes={
+    ...         "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+    ...         "loop": Node(
+    ...             id="loop",
+    ...             kind=NodeKind.TASK,
+    ...             handler="loop",
+    ...             max_visits=2,
+    ...             allow_partial_upstream=True,
+    ...         ),
+    ...         "switch": Node(id="switch", kind=NodeKind.SWITCH, handler="switch"),
+    ...         "out": Node(id="out", kind=NodeKind.TASK, handler="out"),
+    ...     },
+    ...     edges={
+    ...         "start->loop": Edge(id="start->loop", source="start", target="loop"),
+    ...         "loop->switch": Edge(id="loop->switch", source="loop", target="switch"),
+    ...         "switch->loop": Edge(
+    ...             id="switch->loop",
+    ...             source="switch",
+    ...             target="loop",
+    ...             metadata={"route": "continue"},
+    ...         ),
+    ...         "switch->out": Edge(
+    ...             id="switch->out",
+    ...             source="switch",
+    ...             target="out",
+    ...             metadata={"route": "done"},
+    ...         ),
+    ...     },
+    ... )
+    >>> async def run_loop() -> Dict[str, Any]:
+    ...     scheduler = Scheduler(loop_registry, EventBus(), SemaphorePolicy(limit=1))
+    ...     return await scheduler.run(loop_graph)
+    >>> asyncio.run(run_loop())["out"]
+    'done'
+    >>> loop_counter["count"]
+    2
     """
 
     def __init__(
