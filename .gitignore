@@ -29,6 +29,10 @@ coverage.xml
 # Logs
 devsop.md
 design_docs
+*.log
+
+# Environment files
+.env*
 
 # Tool caches
 .ruff_cache/
@@ -36,3 +40,8 @@ design_docs
 
 .codex
 .claude
+
+# Universal temporary files
+Thumbs.db
+*.tmp
+*.swp

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, cast
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple, cast
 
 from .._debug import (
     log_branch,
@@ -134,6 +134,15 @@ class Graph:
                 log_branch(func_name, "switch_node_check")
                 switch_edges = self._forward_adj.get(node.id, [])
                 log_variable_change(func_name, "switch_edges", switch_edges)
+                has_self_loop = any(
+                    edge.source == edge.target == node.id for edge in switch_edges
+                )
+                log_variable_change(func_name, "has_self_loop", has_self_loop)
+                if has_self_loop:
+                    log_branch(func_name, "switch_self_loop")
+                    raise ValueError(
+                        f"Switch node '{node.id}' cannot have a self-loop edge"
+                    )
                 missing_route = [
                     edge.id for edge in switch_edges if "route" not in edge.metadata
                 ]
@@ -172,6 +181,77 @@ class Graph:
             log_branch(func_name, "invalid_handlers_error")
             raise ValueError(f"Nodes missing handlers: {invalid_handlers}")
         log_branch(func_name, "handlers_valid")
+        cycles = self._find_cycles()
+        log_variable_change(func_name, "cycles", cycles)
+        cycle_node_sets = [set(cycle) for cycle in cycles]
+        log_variable_change(func_name, "cycle_node_sets", cycle_node_sets)
+        shared_nodes: Set[str] = set()
+        log_variable_change(func_name, "shared_nodes", shared_nodes)
+        for left_idx, left in enumerate(cycle_node_sets):
+            log_loop_iteration(func_name, "left_cycle", left_idx)
+            for right_idx in range(left_idx + 1, len(cycle_node_sets)):
+                overlap = left & cycle_node_sets[right_idx]
+                log_variable_change(func_name, "overlap", overlap)
+                if overlap:
+                    log_branch(func_name, "shared_nodes_detected")
+                    shared_nodes.update(overlap)
+                    log_variable_change(func_name, "shared_nodes", shared_nodes)
+        if shared_nodes:
+            log_branch(func_name, "shared_node_multi_loop_error")
+            shared_list = sorted(shared_nodes)
+            log_variable_change(func_name, "shared_list", shared_list)
+            raise ValueError(
+                f"Graph has multi-loop shared nodes: {shared_list}"
+            )
+        log_branch(func_name, "cycle_validation_passed")
+
+    @staticmethod
+    def _canonical_cycle(cycle: List[str]) -> Tuple[str, ...]:
+        """Normalize a cycle so equivalent rotations share one representation."""
+        cycle_len = len(cycle)
+        rotations = [
+            tuple(cycle[index:] + cycle[:index]) for index in range(cycle_len)
+        ]
+        return min(rotations)
+
+    def _find_cycles(self) -> List[Tuple[str, ...]]:
+        """Find directed simple cycles in the graph."""
+        func_name = "Graph._find_cycles"
+        log_parameter(func_name)
+        adjacency: Dict[str, List[str]] = {
+            node_id: [edge.target for edge in self._forward_adj.get(node_id, [])]
+            for node_id in self.nodes
+        }
+        log_variable_change(func_name, "adjacency", adjacency)
+        seen: Set[Tuple[str, ...]] = set()
+        log_variable_change(func_name, "seen", seen)
+
+        def dfs(
+            start: str,
+            current: str,
+            path: List[str],
+            in_path: Set[str],
+        ) -> None:
+            for neighbor in adjacency.get(current, []):
+                if neighbor == start and len(path) > 1:
+                    canonical = self._canonical_cycle(path)
+                    seen.add(canonical)
+                    continue
+                if neighbor in in_path:
+                    continue
+                path.append(neighbor)
+                in_path.add(neighbor)
+                dfs(start, neighbor, path, in_path)
+                in_path.remove(neighbor)
+                path.pop()
+
+        for iteration, start in enumerate(sorted(self.nodes)):
+            log_loop_iteration(func_name, "cycle_start_nodes", iteration)
+            dfs(start, start, [start], {start})
+
+        cycles = sorted(seen)
+        log_variable_change(func_name, "cycles", cycles)
+        return cycles
 
     def downstream_nodes(self, node_id: str) -> List[Node]:
         """Return nodes that can be visited after the given node.

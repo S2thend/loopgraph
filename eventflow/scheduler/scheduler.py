@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .._debug import (
     log_branch,
@@ -70,6 +70,60 @@ class Scheduler:
     ...     }
     >>> asyncio.run(run_with_persistence())
     {'completed': ['branch', 'end', 'start'], 'events': ['NODE_SCHEDULED', 'NODE_COMPLETED', 'NODE_SCHEDULED', 'NODE_COMPLETED', 'NODE_SCHEDULED', 'NODE_COMPLETED']}
+
+    Loop re-entry is supported when a SWITCH routes to an already-completed node
+    that still has visit capacity.
+
+    >>> loop_registry = FunctionRegistry()
+    >>> loop_counter = {"count": 0}
+    >>> def loop_handler(_: object) -> dict[str, int]:
+    ...     loop_counter["count"] += 1
+    ...     return {"iteration": loop_counter["count"]}
+    >>> def switch_handler(payload: dict[str, int]) -> str:
+    ...     if payload["iteration"] < 2:
+    ...         return "continue"
+    ...     return "done"
+    >>> loop_registry.register("start", lambda _: None)
+    >>> loop_registry.register("loop", loop_handler)
+    >>> loop_registry.register("switch", switch_handler)
+    >>> loop_registry.register("out", lambda payload: payload)
+    >>> loop_graph = Graph(
+    ...     nodes={
+    ...         "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+    ...         "loop": Node(
+    ...             id="loop",
+    ...             kind=NodeKind.TASK,
+    ...             handler="loop",
+    ...             max_visits=2,
+    ...             allow_partial_upstream=True,
+    ...         ),
+    ...         "switch": Node(id="switch", kind=NodeKind.SWITCH, handler="switch"),
+    ...         "out": Node(id="out", kind=NodeKind.TASK, handler="out"),
+    ...     },
+    ...     edges={
+    ...         "start->loop": Edge(id="start->loop", source="start", target="loop"),
+    ...         "loop->switch": Edge(id="loop->switch", source="loop", target="switch"),
+    ...         "switch->loop": Edge(
+    ...             id="switch->loop",
+    ...             source="switch",
+    ...             target="loop",
+    ...             metadata={"route": "continue"},
+    ...         ),
+    ...         "switch->out": Edge(
+    ...             id="switch->out",
+    ...             source="switch",
+    ...             target="out",
+    ...             metadata={"route": "done"},
+    ...         ),
+    ...     },
+    ... )
+    >>> async def run_loop() -> Dict[str, Any]:
+    ...     scheduler = Scheduler(loop_registry, EventBus(), SemaphorePolicy(limit=1))
+    ...     return await scheduler.run(loop_graph)
+    >>> asyncio.run(run_loop())["out"]
+    'done'
+    >>> loop_counter["count"]
+    2
     """
 
     def __init__(
@@ -171,7 +225,7 @@ class Scheduler:
                         status=NodeStatus.RUNNING,
                     )
                 )
-                handler_result = await self._execute_node(
+                handler_result, reentry_targets = await self._execute_node(
                     node=node,
                     graph=graph,
                     execution_state=execution_state,
@@ -179,10 +233,19 @@ class Scheduler:
                     upstream_payload=input_payload,
                 )
                 log_variable_change(func_name, "handler_result", handler_result)
+                log_variable_change(func_name, "reentry_targets", reentry_targets)
                 results[node_id] = handler_result
                 log_variable_change(func_name, "results", results)
                 pending.remove(node_id)
                 log_variable_change(func_name, "pending", pending)
+                for reentry_iteration, reentry_target in enumerate(reentry_targets):
+                    log_loop_iteration(func_name, "reentry_targets", reentry_iteration)
+                    pending.add(reentry_target)
+                    log_variable_change(
+                        func_name,
+                        f"pending_with_reentry_{reentry_target}",
+                        pending,
+                    )
             if not progressed:
                 log_branch(func_name, "no_progress")
                 raise RuntimeError("Scheduler could not make progress")
@@ -207,7 +270,7 @@ class Scheduler:
         execution_state: ExecutionState,
         graph_id: str,
         upstream_payload: Optional[Any],
-    ) -> Any:
+    ) -> Tuple[Any, List[str]]:
         """Execute a single node handler."""
         func_name = "Scheduler._execute_node"
         log_parameter(
@@ -264,14 +327,52 @@ class Scheduler:
                 execution_state=execution_state,
             )
             log_variable_change(func_name, "selected_edges", selected_edges)
+            reentry_targets: List[str] = []
+            log_variable_change(func_name, "reentry_targets", reentry_targets)
             for iteration, edge in enumerate(selected_edges):
                 log_loop_iteration(func_name, "downstream_edges", iteration)
                 log_variable_change(func_name, "edge", edge)
                 downstream = graph.nodes[edge.target]
                 log_variable_change(func_name, "downstream", downstream)
+                downstream_state = execution_state._ensure_state(downstream.id)
+                log_variable_change(func_name, "downstream_state", downstream_state)
+                downstream_status = downstream_state.status
+                log_variable_change(func_name, "downstream_status", downstream_status)
+                downstream_visits = downstream_state.visits.count
+                log_variable_change(func_name, "downstream_visits", downstream_visits)
+                if downstream_status is NodeStatus.COMPLETED:
+                    has_remaining_visits = self._has_remaining_visits(
+                        graph=graph,
+                        execution_state=execution_state,
+                        node_id=downstream.id,
+                    )
+                    log_variable_change(
+                        func_name, "has_remaining_visits", has_remaining_visits
+                    )
+                    if has_remaining_visits:
+                        log_branch(func_name, "reentry_reset_completed")
+                        execution_state.reset_for_reentry(downstream.id)
+                        reentry_targets.append(downstream.id)
+                        log_variable_change(
+                            func_name,
+                            "reentry_targets",
+                            list(reentry_targets),
+                        )
+                    else:
+                        log_branch(func_name, "reentry_completed_exhausted")
+                elif downstream_status is NodeStatus.FAILED:
+                    log_branch(func_name, "reentry_failed_skip")
+                elif downstream_visits == 0 and downstream_status is NodeStatus.PENDING:
+                    log_branch(func_name, "initial_pending_target")
+                else:
+                    log_branch(func_name, "reentry_non_terminal_error")
+                    raise RuntimeError(
+                        "Encountered non-terminal re-entry target "
+                        f"'{downstream.id}' in state '{downstream_status.value}'"
+                    )
                 execution_state.note_upstream_completion(downstream.id, node.id)
             self._persist_snapshot(execution_state, graph_id)
-            return result
+            return result, reentry_targets
 
     def _build_input_payload(
         self,

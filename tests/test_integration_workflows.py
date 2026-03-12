@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Iterable, cast
+from typing import Iterable, Mapping, cast
+
+import pytest
 
 from eventflow.bus.eventbus import EventBus
 from eventflow.concurrency import PrioritySemaphorePolicy
@@ -180,9 +182,7 @@ def test_loop_respects_max_visits() -> None:
             "loop", f"loop-{iteration}", VisitOutcome.success(iteration)
         )
         state.note_upstream_completion("switch", "loop")
-        loop_state = state._ensure_state("loop")
-        loop_state.status = NodeStatus.PENDING
-        state._completed_nodes.discard("loop")
+        state.reset_for_reentry("loop")
 
     assert not state.is_ready(graph, "loop")
 
@@ -194,6 +194,606 @@ def test_loop_respects_max_visits() -> None:
         execution_state=state,
     )
     assert selected and selected[0].target == "exit"
+
+
+def test_reset_for_reentry_preserves_visits_and_snapshot_round_trip() -> None:
+    state = ExecutionState()
+    state.mark_running("loop")
+    state.mark_complete("loop", "loop-1", VisitOutcome.success({"value": 1}))
+    state.note_upstream_completion("loop", "upstream-a")
+
+    before = state.snapshot()["states"]["loop"]["visits"]["count"]
+    state.reset_for_reentry("loop")
+    snapshot = state.snapshot()
+
+    assert snapshot["states"]["loop"]["status"] == NodeStatus.PENDING.value
+    assert snapshot["states"]["loop"]["upstream_completed"] == []
+    assert snapshot["states"]["loop"]["visits"]["count"] == before
+    assert "loop" not in snapshot["completed_nodes"]
+
+    restored = ExecutionState.restore(snapshot)
+    assert restored.snapshot() == snapshot
+
+
+def test_graph_validate_rejects_shared_node_multi_loop() -> None:
+    graph = Graph(
+        nodes={
+            "a": Node(id="a", kind=NodeKind.TASK, handler="a"),
+            "b": Node(id="b", kind=NodeKind.TASK, handler="b"),
+            "c": Node(id="c", kind=NodeKind.TASK, handler="c"),
+        },
+        edges={
+            "a->b": Edge(id="a->b", source="a", target="b"),
+            "b->a": Edge(id="b->a", source="b", target="a"),
+            "b->c": Edge(id="b->c", source="b", target="c"),
+            "c->b": Edge(id="c->b", source="c", target="b"),
+        },
+    )
+
+    with pytest.raises(ValueError, match="multi-loop shared nodes"):
+        graph.validate()
+
+
+def test_graph_validate_allows_multiple_disjoint_loops() -> None:
+    graph = Graph(
+        nodes={
+            "a": Node(id="a", kind=NodeKind.TASK, handler="a"),
+            "b": Node(id="b", kind=NodeKind.TASK, handler="b"),
+            "c": Node(id="c", kind=NodeKind.TASK, handler="c"),
+            "d": Node(id="d", kind=NodeKind.TASK, handler="d"),
+        },
+        edges={
+            "a->b": Edge(id="a->b", source="a", target="b"),
+            "b->a": Edge(id="b->a", source="b", target="a"),
+            "c->d": Edge(id="c->d", source="c", target="d"),
+            "d->c": Edge(id="d->c", source="d", target="c"),
+        },
+    )
+
+    graph.validate()
+
+
+def test_graph_validate_allows_single_long_loop() -> None:
+    graph = Graph(
+        nodes={
+            "a": Node(id="a", kind=NodeKind.TASK, handler="a"),
+            "b": Node(id="b", kind=NodeKind.TASK, handler="b"),
+            "c": Node(id="c", kind=NodeKind.TASK, handler="c"),
+        },
+        edges={
+            "a->b": Edge(id="a->b", source="a", target="b"),
+            "b->c": Edge(id="b->c", source="b", target="c"),
+            "c->a": Edge(id="c->a", source="c", target="a"),
+        },
+    )
+
+    graph.validate()
+
+
+def test_graph_validate_rejects_switch_self_loop() -> None:
+    graph = Graph(
+        nodes={
+            "s": Node(id="s", kind=NodeKind.SWITCH, handler="switch"),
+        },
+        edges={
+            "s->s": Edge(
+                id="s->s",
+                source="s",
+                target="s",
+                metadata={"route": "loop"},
+            )
+        },
+    )
+
+    with pytest.raises(ValueError, match="cannot have a self-loop"):
+        graph.validate()
+
+
+def test_graph_validate_allows_non_switch_self_loop() -> None:
+    graph = Graph(
+        nodes={
+            "t": Node(id="t", kind=NodeKind.TASK, handler="task"),
+        },
+        edges={
+            "t->t": Edge(id="t->t", source="t", target="t"),
+        },
+    )
+
+    graph.validate()
+
+
+def test_scheduler_bounded_loop_reentry() -> None:
+    registry = FunctionRegistry()
+    counter = {"loop": 0, "output": 0}
+
+    def start_handler(_: object) -> None:
+        return None
+
+    def loop_handler(_: object) -> dict[str, int]:
+        counter["loop"] += 1
+        return {"iteration": counter["loop"]}
+
+    def switch_handler(payload: dict[str, int]) -> str:
+        return "continue" if payload["iteration"] < 3 else "done"
+
+    def output_handler(payload: str) -> str:
+        counter["output"] += 1
+        return payload
+
+    registry.register("start", start_handler)
+    registry.register("loop", loop_handler)
+    registry.register("switch", switch_handler)
+    registry.register("output", output_handler)
+
+    graph = Graph(
+        nodes={
+            "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+            "loop": Node(
+                id="loop",
+                kind=NodeKind.TASK,
+                handler="loop",
+                max_visits=3,
+                allow_partial_upstream=True,
+            ),
+            "switch": Node(id="switch", kind=NodeKind.SWITCH, handler="switch"),
+            "output": Node(id="output", kind=NodeKind.TASK, handler="output"),
+        },
+        edges={
+            "start->loop": Edge(id="start->loop", source="start", target="loop"),
+            "loop->switch": Edge(id="loop->switch", source="loop", target="switch"),
+            "switch->loop": Edge(
+                id="switch->loop",
+                source="switch",
+                target="loop",
+                metadata={"route": "continue"},
+            ),
+            "switch->output": Edge(
+                id="switch->output",
+                source="switch",
+                target="output",
+                metadata={"route": "done"},
+            ),
+        },
+    )
+
+    scheduler = Scheduler(registry, EventBus(), PrioritySemaphorePolicy(1))
+    results = asyncio.run(scheduler.run(graph))
+
+    assert counter["loop"] == 3
+    assert counter["output"] == 1
+    assert results["output"] == "done"
+
+
+def test_scheduler_loop_max_visits_1() -> None:
+    registry = FunctionRegistry()
+    counter = {"loop": 0, "output": 0}
+
+    def start_handler(_: object) -> None:
+        return None
+
+    def loop_handler(_: object) -> dict[str, int]:
+        counter["loop"] += 1
+        return {"iteration": counter["loop"]}
+
+    def switch_handler(_: dict[str, int]) -> str:
+        return "continue"
+
+    def output_handler(payload: str) -> str:
+        counter["output"] += 1
+        return payload
+
+    registry.register("start", start_handler)
+    registry.register("loop", loop_handler)
+    registry.register("switch", switch_handler)
+    registry.register("output", output_handler)
+
+    graph = Graph(
+        nodes={
+            "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+            "loop": Node(
+                id="loop",
+                kind=NodeKind.TASK,
+                handler="loop",
+                max_visits=1,
+                allow_partial_upstream=True,
+            ),
+            "switch": Node(id="switch", kind=NodeKind.SWITCH, handler="switch"),
+            "output": Node(id="output", kind=NodeKind.TASK, handler="output"),
+        },
+        edges={
+            "start->loop": Edge(id="start->loop", source="start", target="loop"),
+            "loop->switch": Edge(id="loop->switch", source="loop", target="switch"),
+            "switch->loop": Edge(
+                id="switch->loop",
+                source="switch",
+                target="loop",
+                metadata={"route": "continue"},
+            ),
+            "switch->output": Edge(
+                id="switch->output",
+                source="switch",
+                target="output",
+                metadata={"route": "exit"},
+            ),
+        },
+    )
+
+    scheduler = Scheduler(registry, EventBus(), PrioritySemaphorePolicy(1))
+    results = asyncio.run(scheduler.run(graph))
+
+    assert counter["loop"] == 1
+    assert counter["output"] == 1
+    assert results["output"] == "continue"
+
+
+def test_scheduler_disjoint_loops_execute() -> None:
+    registry = FunctionRegistry()
+    counters = {"loop_a": 0, "loop_b": 0}
+
+    def start_handler(_: object) -> None:
+        return None
+
+    def loop_a_handler(_: object) -> dict[str, int]:
+        counters["loop_a"] += 1
+        return {"n": counters["loop_a"]}
+
+    def loop_b_handler(_: object) -> dict[str, int]:
+        counters["loop_b"] += 1
+        return {"n": counters["loop_b"]}
+
+    def switch_a_handler(payload: dict[str, int]) -> str:
+        return "continue_a" if payload["n"] < 2 else "done_a"
+
+    def switch_b_handler(payload: dict[str, int]) -> str:
+        return "continue_b" if payload["n"] < 2 else "done_b"
+
+    def output_handler(payload: str) -> str:
+        return payload
+
+    registry.register("start", start_handler)
+    registry.register("loop_a", loop_a_handler)
+    registry.register("switch_a", switch_a_handler)
+    registry.register("loop_b", loop_b_handler)
+    registry.register("switch_b", switch_b_handler)
+    registry.register("out_a", output_handler)
+    registry.register("out_b", output_handler)
+
+    graph = Graph(
+        nodes={
+            "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+            "loop_a": Node(
+                id="loop_a",
+                kind=NodeKind.TASK,
+                handler="loop_a",
+                max_visits=2,
+                allow_partial_upstream=True,
+            ),
+            "switch_a": Node(id="switch_a", kind=NodeKind.SWITCH, handler="switch_a"),
+            "out_a": Node(id="out_a", kind=NodeKind.TASK, handler="out_a"),
+            "loop_b": Node(
+                id="loop_b",
+                kind=NodeKind.TASK,
+                handler="loop_b",
+                max_visits=2,
+                allow_partial_upstream=True,
+            ),
+            "switch_b": Node(id="switch_b", kind=NodeKind.SWITCH, handler="switch_b"),
+            "out_b": Node(id="out_b", kind=NodeKind.TASK, handler="out_b"),
+        },
+        edges={
+            "start->loop_a": Edge(id="start->loop_a", source="start", target="loop_a"),
+            "start->loop_b": Edge(id="start->loop_b", source="start", target="loop_b"),
+            "loop_a->switch_a": Edge(
+                id="loop_a->switch_a", source="loop_a", target="switch_a"
+            ),
+            "switch_a->loop_a": Edge(
+                id="switch_a->loop_a",
+                source="switch_a",
+                target="loop_a",
+                metadata={"route": "continue_a"},
+            ),
+            "switch_a->out_a": Edge(
+                id="switch_a->out_a",
+                source="switch_a",
+                target="out_a",
+                metadata={"route": "done_a"},
+            ),
+            "loop_b->switch_b": Edge(
+                id="loop_b->switch_b", source="loop_b", target="switch_b"
+            ),
+            "switch_b->loop_b": Edge(
+                id="switch_b->loop_b",
+                source="switch_b",
+                target="loop_b",
+                metadata={"route": "continue_b"},
+            ),
+            "switch_b->out_b": Edge(
+                id="switch_b->out_b",
+                source="switch_b",
+                target="out_b",
+                metadata={"route": "done_b"},
+            ),
+        },
+    )
+    graph.validate()
+
+    scheduler = Scheduler(registry, EventBus(), PrioritySemaphorePolicy(1))
+    results = asyncio.run(scheduler.run(graph))
+
+    assert counters["loop_a"] == 2
+    assert counters["loop_b"] == 2
+    assert results["out_a"] == "done_a"
+    assert results["out_b"] == "done_b"
+
+
+def test_scheduler_reentry_pending_running_hard_stop() -> None:
+    registry = FunctionRegistry()
+    registry.register("switch", lambda _: "loop")
+
+    graph = Graph(
+        nodes={
+            "switch": Node(id="switch", kind=NodeKind.SWITCH, handler="switch"),
+            "loop": Node(
+                id="loop",
+                kind=NodeKind.TASK,
+                handler="noop",
+                allow_partial_upstream=True,
+            ),
+        },
+        edges={
+            "switch->loop": Edge(
+                id="switch->loop",
+                source="switch",
+                target="loop",
+                metadata={"route": "loop"},
+            )
+        },
+    )
+    registry.register("noop", lambda _: None)
+    state = ExecutionState()
+    state.mark_running("loop")
+    scheduler = Scheduler(registry, EventBus(), PrioritySemaphorePolicy(1))
+
+    with pytest.raises(RuntimeError, match="non-terminal"):
+        asyncio.run(
+            scheduler._execute_node(
+                node=graph.nodes["switch"],
+                graph=graph,
+                execution_state=state,
+                graph_id="graph",
+                upstream_payload=None,
+            )
+        )
+
+
+def test_scheduler_unbounded_loop_handler_exit() -> None:
+    registry = FunctionRegistry()
+    counter = {"loop": 0, "output": 0}
+
+    def start_handler(_: object) -> None:
+        return None
+
+    def loop_handler(_: object) -> dict[str, int]:
+        counter["loop"] += 1
+        return {"iteration": counter["loop"]}
+
+    def switch_handler(payload: dict[str, int]) -> str:
+        return "continue" if payload["iteration"] < 5 else "done"
+
+    def output_handler(payload: str) -> str:
+        counter["output"] += 1
+        return payload
+
+    registry.register("start", start_handler)
+    registry.register("loop", loop_handler)
+    registry.register("switch", switch_handler)
+    registry.register("output", output_handler)
+
+    graph = Graph(
+        nodes={
+            "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+            "loop": Node(
+                id="loop",
+                kind=NodeKind.TASK,
+                handler="loop",
+                allow_partial_upstream=True,
+            ),
+            "switch": Node(id="switch", kind=NodeKind.SWITCH, handler="switch"),
+            "output": Node(id="output", kind=NodeKind.TASK, handler="output"),
+        },
+        edges={
+            "start->loop": Edge(id="start->loop", source="start", target="loop"),
+            "loop->switch": Edge(id="loop->switch", source="loop", target="switch"),
+            "switch->loop": Edge(
+                id="switch->loop",
+                source="switch",
+                target="loop",
+                metadata={"route": "continue"},
+            ),
+            "switch->output": Edge(
+                id="switch->output",
+                source="switch",
+                target="output",
+                metadata={"route": "done"},
+            ),
+        },
+    )
+
+    scheduler = Scheduler(registry, EventBus(), PrioritySemaphorePolicy(1))
+    results = asyncio.run(scheduler.run(graph))
+
+    assert counter["loop"] == 5
+    assert counter["output"] == 1
+    assert results["output"] == "done"
+
+
+def test_loop_visit_count_observability() -> None:
+    registry = FunctionRegistry()
+    counter = {"loop": 0}
+
+    def start_handler(_: object) -> None:
+        return None
+
+    def loop_handler(_: object) -> dict[str, int]:
+        counter["loop"] += 1
+        return {"iteration": counter["loop"]}
+
+    def switch_handler(payload: dict[str, int]) -> str:
+        return "continue" if payload["iteration"] < 3 else "done"
+
+    def output_handler(payload: str) -> str:
+        return payload
+
+    registry.register("start", start_handler)
+    registry.register("loop", loop_handler)
+    registry.register("switch", switch_handler)
+    registry.register("output", output_handler)
+
+    graph = Graph(
+        nodes={
+            "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+            "loop": Node(
+                id="loop",
+                kind=NodeKind.TASK,
+                handler="loop",
+                max_visits=3,
+                allow_partial_upstream=True,
+            ),
+            "switch": Node(id="switch", kind=NodeKind.SWITCH, handler="switch"),
+            "output": Node(id="output", kind=NodeKind.TASK, handler="output"),
+        },
+        edges={
+            "start->loop": Edge(id="start->loop", source="start", target="loop"),
+            "loop->switch": Edge(id="loop->switch", source="loop", target="switch"),
+            "switch->loop": Edge(
+                id="switch->loop",
+                source="switch",
+                target="loop",
+                metadata={"route": "continue"},
+            ),
+            "switch->output": Edge(
+                id="switch->output",
+                source="switch",
+                target="output",
+                metadata={"route": "done"},
+            ),
+        },
+    )
+
+    event_log = InMemoryEventLog()
+    scheduler = Scheduler(
+        registry,
+        EventBus(),
+        PrioritySemaphorePolicy(1),
+        event_log=event_log,
+    )
+    asyncio.run(scheduler.run(graph, graph_id="visit-observability"))
+
+    counts = [
+        event.visit_count
+        for event in event_log.iter("visit-observability")
+        if event.type is EventType.NODE_COMPLETED and event.node_id == "loop"
+    ]
+    assert counts == [1, 2, 3]
+
+
+def test_loop_snapshot_resume_visit_count() -> None:
+    class FailingOnceSnapshotStore(InMemorySnapshotStore):
+        def __init__(self, fail_on_save: int) -> None:
+            super().__init__()
+            self._save_calls = 0
+            self._fail_on_save = fail_on_save
+            self._failed = False
+
+        def save(self, graph_id: str, snapshot: Mapping[str, object]) -> None:
+            self._save_calls += 1
+            if not self._failed and self._save_calls == self._fail_on_save:
+                self._failed = True
+                raise RuntimeError("simulated stop")
+            super().save(graph_id, snapshot)
+
+    registry = FunctionRegistry()
+    counter = {"loop": 0}
+
+    def start_handler(_: object) -> None:
+        return None
+
+    def loop_handler(_: object) -> dict[str, int]:
+        counter["loop"] += 1
+        return {"iteration": counter["loop"]}
+
+    def switch_handler(payload: dict[str, int]) -> str:
+        return "continue" if payload["iteration"] < 3 else "done"
+
+    def output_handler(payload: str) -> str:
+        return payload
+
+    registry.register("start", start_handler)
+    registry.register("loop", loop_handler)
+    registry.register("switch", switch_handler)
+    registry.register("output", output_handler)
+
+    graph = Graph(
+        nodes={
+            "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+            "loop": Node(
+                id="loop",
+                kind=NodeKind.TASK,
+                handler="loop",
+                max_visits=3,
+                allow_partial_upstream=True,
+            ),
+            "switch": Node(id="switch", kind=NodeKind.SWITCH, handler="switch"),
+            "output": Node(id="output", kind=NodeKind.TASK, handler="output"),
+        },
+        edges={
+            "start->loop": Edge(id="start->loop", source="start", target="loop"),
+            "loop->switch": Edge(id="loop->switch", source="loop", target="switch"),
+            "switch->loop": Edge(
+                id="switch->loop",
+                source="switch",
+                target="loop",
+                metadata={"route": "continue"},
+            ),
+            "switch->output": Edge(
+                id="switch->output",
+                source="switch",
+                target="output",
+                metadata={"route": "done"},
+            ),
+        },
+    )
+
+    snapshot_store = FailingOnceSnapshotStore(fail_on_save=5)
+    with pytest.raises(RuntimeError, match="simulated stop"):
+        asyncio.run(
+            Scheduler(
+                registry,
+                EventBus(),
+                PrioritySemaphorePolicy(1),
+                snapshot_store=snapshot_store,
+            ).run(graph, graph_id="resume-loop")
+        )
+
+    resumed_log = InMemoryEventLog()
+    resumed_results = asyncio.run(
+        Scheduler(
+            registry,
+            EventBus(),
+            PrioritySemaphorePolicy(1),
+            snapshot_store=snapshot_store,
+            event_log=resumed_log,
+        ).run(graph, graph_id="resume-loop")
+    )
+
+    resumed_counts = [
+        event.visit_count
+        for event in resumed_log.iter("resume-loop")
+        if event.type is EventType.NODE_COMPLETED and event.node_id == "loop"
+    ]
+
+    assert resumed_counts == [3]
+    assert resumed_results["output"] == "done"
 
 
 def test_global_concurrency_across_schedulers() -> None:

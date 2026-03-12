@@ -1,26 +1,22 @@
 <!--
 Sync Impact Report
 ===================
-Version change: 1.4.2 → 1.5.0
+Version change: 1.5.3 → 1.5.4
 Modified principles:
-  - IX. Typing-First API Contract: added explicit py.typed marker requirement
-  - VIII. Debug Traceability: no text change (constraint refinement below)
-Added sections:
-  - XIV. Bounded Loop Semantics (new principle)
-  - XV. Explicit Error Propagation (new principle)
+  - XIV. Bounded Loop Semantics: re-added runtime hard-stop for PENDING/RUNNING
+    back-edge targets as defensive fallback; added SWITCH self-loop rejection
+    at graph validation
 Removed sections: none
-Technical Constraints changes:
-  - Debug logging release policy: specified logging.getLogger gating mechanism
-Development Workflow changes:
-  - Branch naming scoped to feature branches; hotfix/release exempt
-Governance changes:
-  - Added spec Constitution Alignment to compliance review expectations
+Added sections: none
+Technical Constraints changes: none
+Development Workflow changes: none
+Governance changes: none
 Templates requiring updates:
-  - .specify/templates/plan-template.md ✅ updated (added XIV, XV to Constitution Check)
-  - .specify/templates/spec-template.md ✅ already aligned
-  - .specify/templates/tasks-template.md ✅ updated (added XIV, XV quality tasks)
-  - .specify/templates/commands/*.md N/A (directory not present)
+  - No template changes required (principle clarification)
 Follow-up TODOs: none
+
+Previous sync (1.5.2 → 1.5.3):
+  Modified: XIV (disjoint loops, removed runtime hard-stop); Constraints: none
 -->
 
 # EventFlow2 Constitution
@@ -35,10 +31,16 @@ and state/event persistence. Domain-specific behavior (metrics, retries, side
 effects, remote orchestration) MUST live in handlers or external services. Any
 proposal to expand core modules MUST first show why the behavior cannot be
 composed outside `eventflow/core` and `eventflow/scheduler`. Core APIs MUST stay
-minimally opinionated to maximize user freedom in workflow design.
+minimally opinionated to maximize user freedom in workflow design. EventFlow2's
+core is a graph execution engine; features outside graph execution semantics are
+out of scope unless required for correctness. Design decisions MUST follow
+Occam's razor: choose the smallest correct core behavior and push optional
+policy to handlers or integrations.
 
 Rationale: the less policy built into the engine, the more predictable and
-resilient the platform remains across diverse workloads.
+resilient the platform remains across diverse workloads. Keeping core logic
+compact and scope-disciplined maximizes long-term flexibility for user-level
+composition.
 
 ### II. Edge-Heavy Work
 
@@ -163,11 +165,26 @@ environments.
 The scheduler MUST track visit counts for every node and MUST NOT re-schedule a
 node whose visit count has reached its `max_visits` limit. Nodes targeted by
 back-edges are SUGGESTED to declare an explicit `max_visits` to ensure
-deterministic termination. When `max_visits` is not set, the scheduler MUST apply
-its default termination policy.
+deterministic termination. When `max_visits` is not set, the scheduler SHOULD
+declare an explicit termination strategy; omitting one is permitted for
+intentionally unbounded loops (e.g., a primary agent loop) where the handler
+controls exit. The scheduler MUST support loop topologies of any cycle length
+and MAY include multiple disjoint loops in the same graph. Multiple loops that
+share nodes are explicitly OUT OF SCOPE; graph construction MUST reject graphs
+containing shared-node multi-loop topologies before execution begins. SWITCH
+self-loops (a SWITCH node routing back to itself) MUST be rejected at graph
+validation. The scheduler MUST additionally raise a runtime error if a back-edge
+targets a node in a non-terminal state (PENDING or RUNNING) as a defensive
+fallback.
 
 Rationale: deterministic termination prevents runaway workflows and makes loop
-behavior inspectable and testable.
+behavior inspectable and testable, while allowing intentionally unbounded loops
+where the handler owns the exit decision. Allowing disjoint loops preserves
+expressiveness without adding state-ownership conflicts; rejecting shared-node
+multi-loop topologies avoids ambiguous re-entry ownership and contention.
+SWITCH self-loops are meaningless (routing without processing) and are rejected
+to prevent degenerate graphs. The runtime hard-stop for non-terminal back-edge
+targets is a defensive fallback for bugs that bypass graph validation.
 
 ### XV. Explicit Error Propagation
 
@@ -206,6 +223,9 @@ observability guarantees of Principle XI.
 - **Handler-owned retries/compensation**: The framework MUST NOT add implicit
   retry/backoff policies; retry and compensation logic MUST remain in user
   workflow logic and handlers.
+- **Occam scope gate**: Core scheduler changes MUST prefer the smallest correct
+  graph-execution behavior; optional domain policy and out-of-scope orchestration
+  logic MUST be implemented in handlers, integrations, or external services.
 
 ## Development Workflow
 
@@ -256,4 +276,4 @@ constitution, this document takes precedence.
   including user-defined failure-pattern tests where applicable.
 - Every pull request MUST state how constitution compliance was validated.
 
-**Version**: 1.5.0 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-20
+**Version**: 1.5.4 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-28
