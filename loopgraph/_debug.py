@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-LOGGER = logging.getLogger("eventflow")
+LOGGER = logging.getLogger("loopgraph")
 
 
 def log_parameter(func_name: str, **params: Any) -> None:

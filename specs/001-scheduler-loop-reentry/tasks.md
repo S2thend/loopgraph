@@ -17,7 +17,7 @@ documentation examples are touched.
 
 ## Path Conventions
 
-- **Package source**: `eventflow/` at repository root
+- **Package source**: `loopgraph/` at repository root
 - **Tests**: `tests/` at repository root
 
 ---
@@ -36,8 +36,8 @@ documentation examples are touched.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [X] T002 [P] Add `reset_for_reentry(node_id)` method to `ExecutionState` in `eventflow/core/state.py`. Must: set status to `NodeStatus.PENDING`, clear `upstream_completed`, remove from `_completed_nodes`. Must NOT reset `visits.count`. Include `eventflow._debug` logging (`log_parameter`, `log_variable_change`, `log_branch`). Include docstring with doctest example.
-- [X] T003 [P] Add shared-node multi-loop validation and SWITCH self-loop rejection to `Graph.validate()` in `eventflow/core/graph.py`. Use DFS-based cycle detection on forward adjacency. Find all cycles, check for node intersection across cycles. Raise `ValueError` listing shared nodes if any node appears in more than one cycle. Also reject edges where `source == target` and the source node is `NodeKind.SWITCH` (SWITCH self-loops are meaningless). Include `eventflow._debug` logging. Include docstring with doctest example.
+- [X] T002 [P] Add `reset_for_reentry(node_id)` method to `ExecutionState` in `loopgraph/core/state.py`. Must: set status to `NodeStatus.PENDING`, clear `upstream_completed`, remove from `_completed_nodes`. Must NOT reset `visits.count`. Include `loopgraph._debug` logging (`log_parameter`, `log_variable_change`, `log_branch`). Include docstring with doctest example.
+- [X] T003 [P] Add shared-node multi-loop validation and SWITCH self-loop rejection to `Graph.validate()` in `loopgraph/core/graph.py`. Use DFS-based cycle detection on forward adjacency. Find all cycles, check for node intersection across cycles. Raise `ValueError` listing shared nodes if any node appears in more than one cycle. Also reject edges where `source == target` and the source node is `NodeKind.SWITCH` (SWITCH self-loops are meaningless). Include `loopgraph._debug` logging. Include docstring with doctest example.
 - [X] T004 Unit test for `reset_for_reentry` in `tests/test_integration_workflows.py`: verify status reset to PENDING, `upstream_completed` cleared, removed from `_completed_nodes`, `visits.count` preserved. Verify snapshot/restore round-trip after reset.
 - [X] T005 Unit test for graph topology validation in `tests/test_integration_workflows.py`: verify `Graph.validate()` raises `ValueError` for graphs with overlapping cycles. Verify graphs with multiple disjoint loops pass validation. Verify graphs with a single loop of any length pass validation. Verify SWITCH self-loop raises `ValueError`. Verify non-SWITCH self-loop passes validation.
 
@@ -60,8 +60,8 @@ documentation examples are touched.
 
 ### Implementation for User Story 1
 
-- [X] T009 [US1] Modify `_execute_node` in `eventflow/scheduler/scheduler.py` to detect re-entry targets after downstream edge processing (line 267-272). For each selected edge target: if target status is COMPLETED and has remaining visits, call `reset_for_reentry`. If target is PENDING or RUNNING, raise `RuntimeError` (defensive hard-stop). Otherwise (FAILED), do not reset. Return `Tuple[Any, List[str]]` (handler result + re-entry node IDs). Include `eventflow._debug` logging for re-entry detection.
-- [X] T010 [US1] Modify `run()` in `eventflow/scheduler/scheduler.py` to unpack `_execute_node` return value as `handler_result, reentry_targets`. After `pending.remove(node_id)`, add `pending.add(target)` for each re-entry target. Include `eventflow._debug` logging for re-queue.
+- [X] T009 [US1] Modify `_execute_node` in `loopgraph/scheduler/scheduler.py` to detect re-entry targets after downstream edge processing (line 267-272). For each selected edge target: if target status is COMPLETED and has remaining visits, call `reset_for_reentry`. If target is PENDING or RUNNING, raise `RuntimeError` (defensive hard-stop). Otherwise (FAILED), do not reset. Return `Tuple[Any, List[str]]` (handler result + re-entry node IDs). Include `loopgraph._debug` logging for re-entry detection.
+- [X] T010 [US1] Modify `run()` in `loopgraph/scheduler/scheduler.py` to unpack `_execute_node` return value as `handler_result, reentry_targets`. After `pending.remove(node_id)`, add `pending.add(target)` for each re-entry target. Include `loopgraph._debug` logging for re-queue.
 - [X] T011 [US1] Update existing `test_loop_respects_max_visits` in `tests/test_integration_workflows.py`: replace manual state reset (lines 183-185) with `state.reset_for_reentry("loop")` to validate the new method integrates with existing test patterns.
 
 **Checkpoint**: Bounded loop re-entry works end-to-end via `Scheduler.run()`. This is the MVP — loops with `max_visits` work natively without manual state manipulation.
@@ -109,13 +109,13 @@ No additional code changes needed — `mark_complete` already increments `visits
 
 **Purpose**: Quality gates and cross-cutting validation
 
-- [X] T015 Run doctest gate: `python -m pytest --doctest-modules eventflow/core/state.py` — verify `reset_for_reentry` doctest passes
-- [X] T016 Run doctest gate: `python -m pytest --doctest-modules eventflow/core/graph.py` — verify validate() cycle detection doctest passes
+- [X] T015 Run doctest gate: `python -m pytest --doctest-modules loopgraph/core/state.py` — verify `reset_for_reentry` doctest passes
+- [X] T016 Run doctest gate: `python -m pytest --doctest-modules loopgraph/core/graph.py` — verify validate() cycle detection doctest passes
 - [X] T017 Run doctest gate: `python -m pytest tests/test_doctests.py` — verify all doctests pass
 - [X] T018 Run type check: `mypy` with repository configuration — verify all changed modules pass
 - [X] T019 Run lint: `ruff check` — verify all changed modules pass
 - [X] T020 Run full test suite: `python -m pytest tests/ -x -v` — verify all tests pass including existing ones (backward compatibility)
-- [X] T021 Verify `eventflow._debug` traces: review `reset_for_reentry`, re-entry detection in `_execute_node`, and cycle detection in `validate()` all use `log_parameter`, `log_variable_change`, `log_branch` consistently
+- [X] T021 Verify `loopgraph._debug` traces: review `reset_for_reentry`, re-entry detection in `_execute_node`, and cycle detection in `validate()` all use `log_parameter`, `log_variable_change`, `log_branch` consistently
 - [X] T022 Verify `max_visits` enforcement: confirm visit counts accumulate across re-entries and exhausted nodes take exit route (Principle XIV)
 - [X] T023 Verify fail-fast behavior: confirm handler exceptions still emit `NODE_FAILED` and abort `Scheduler.run()` (Principle XV)
 - [X] T024 Verify zero-runtime-dependency NFR: confirm `[project.dependencies]` remains unchanged (no new runtime deps)
@@ -181,6 +181,6 @@ No additional code changes needed — `mark_complete` already increments `visits
 - [P] tasks = different files, no dependencies
 - [Story] label maps task to specific user story for traceability
 - US2 and US3 require no additional code — the US1 implementation handles both. Phases 4 and 5 are test-only.
-- The 3 source files modified: `eventflow/core/state.py`, `eventflow/core/graph.py`, `eventflow/scheduler/scheduler.py`
+- The 3 source files modified: `loopgraph/core/state.py`, `loopgraph/core/graph.py`, `loopgraph/scheduler/scheduler.py`
 - The 1 test file modified: `tests/test_integration_workflows.py`
 - Commit after each phase checkpoint

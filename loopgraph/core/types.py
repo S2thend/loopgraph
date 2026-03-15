@@ -1,4 +1,4 @@
-"""Fundamental enums and dataclasses shared across EventFlow modules."""
+"""Fundamental enums and dataclasses shared across LoopGraph modules."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .._debug import log_parameter, log_variable_change
 
 
 class NodeKind(str, Enum):
-    """Enumerated node kinds supported by EventFlow."""
+    """Enumerated node kinds supported by LoopGraph."""
 
     TASK = "task"
     SWITCH = "switch"

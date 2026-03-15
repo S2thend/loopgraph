@@ -12,8 +12,8 @@ from ..core.state import ExecutionState
 def describe_graph(graph: Graph) -> Dict[str, object]:
     """Return a summary of the graph structure.
 
-    >>> from eventflow.core.graph import Edge, Node
-    >>> from eventflow.core.types import NodeKind
+    >>> from loopgraph.core.graph import Edge, Node
+    >>> from loopgraph.core.types import NodeKind
     >>> graph = Graph(
     ...     nodes={
     ...         "start": Node(id="start", kind=NodeKind.TASK, handler="start_handler"),
@@ -38,7 +38,7 @@ def describe_graph(graph: Graph) -> Dict[str, object]:
 def describe_execution_state(state: ExecutionState) -> Dict[str, object]:
     """Summarise execution state snapshot data.
 
-    >>> from eventflow.core.types import VisitOutcome, NodeStatus
+    >>> from loopgraph.core.types import VisitOutcome, NodeStatus
     >>> execution = ExecutionState()
     >>> execution.mark_complete(
     ...     "node-1",

@@ -23,7 +23,7 @@ class Scheduler:
     """Execute graphs by dispatching node handlers.
 
     >>> import asyncio
-    >>> from eventflow.core.graph import Edge, Node, NodeKind
+    >>> from loopgraph.core.graph import Edge, Node, NodeKind
     >>> registry = FunctionRegistry()
     >>> registry.register("start", lambda payload: payload + ["start"])
     >>> registry.register("end", lambda payload: f"{payload}-done")
@@ -47,8 +47,8 @@ class Scheduler:
     ...     return results
     >>> asyncio.run(run())
     {'start': ['start'], 'branch': 'right', 'end': 'right-done'}
-    >>> from eventflow.core.types import EventType
-    >>> from eventflow.persistence import InMemoryEventLog, InMemorySnapshotStore
+    >>> from loopgraph.core.types import EventType
+    >>> from loopgraph.persistence import InMemoryEventLog, InMemorySnapshotStore
     >>> async def run_with_persistence() -> Dict[str, Any]:
     ...     bus = EventBus()
     ...     policy = SemaphorePolicy(limit=2)

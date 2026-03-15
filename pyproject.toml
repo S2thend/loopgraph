@@ -3,11 +3,11 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "eventflow2"
+name = "loopgraph"
 version = "0.2.0"
-description = "Asynchronous graph-driven workflow engine."
+description = "Event-driven graph workflow engine with native loop support."
 authors = [
-  { name = "EventFlow2 Team" }
+  { name = "LoopGraph Team" }
 ]
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,7 +26,7 @@ lint = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["eventflow*"]
+include = ["loopgraph*"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
@@ -42,11 +42,11 @@ ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.10"
-packages = ["eventflow"]
+packages = ["loopgraph"]
 check_untyped_defs = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unused_configs = true
 
 [tool.setuptools.package-data]
-eventflow = ["py.typed"]
+loopgraph = ["py.typed"]

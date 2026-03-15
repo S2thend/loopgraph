@@ -31,7 +31,7 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- [ ] **Compact Core**: The plan keeps `eventflow/core` and `eventflow/scheduler`
+- [ ] **Compact Core**: The plan keeps `loopgraph/core` and `loopgraph/scheduler`
       focused on orchestration primitives, with minimal opinionated behavior and
       maximum user freedom in workflow design.
 - [ ] **Edge-Heavy Work**: No long-running or distributed fan-out execution is

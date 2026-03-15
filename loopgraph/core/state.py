@@ -1,4 +1,4 @@
-"""Runtime execution state helpers for EventFlow."""
+"""Runtime execution state helpers for LoopGraph."""
 
 from __future__ import annotations
 
@@ -124,8 +124,8 @@ class NodeRuntimeState:
 class ExecutionState:
     """Container for per-node runtime state tracking.
 
-    >>> from eventflow.core.graph import Edge, Node
-    >>> from eventflow.core.types import NodeKind
+    >>> from loopgraph.core.graph import Edge, Node
+    >>> from loopgraph.core.types import NodeKind
     >>> graph = Graph(
     ...     nodes={
     ...         "a": Node(id="a", kind=NodeKind.TASK, handler="A"),

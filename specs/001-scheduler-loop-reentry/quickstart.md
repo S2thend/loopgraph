@@ -9,12 +9,12 @@
 
 ```python
 import asyncio
-from eventflow.bus.eventbus import EventBus
-from eventflow.concurrency import PrioritySemaphorePolicy
-from eventflow.core.graph import Edge, Graph, Node
-from eventflow.core.types import NodeKind
-from eventflow.registry.function_registry import FunctionRegistry
-from eventflow.scheduler.scheduler import Scheduler
+from loopgraph.bus.eventbus import EventBus
+from loopgraph.concurrency import PrioritySemaphorePolicy
+from loopgraph.core.graph import Edge, Graph, Node
+from loopgraph.core.types import NodeKind
+from loopgraph.registry.function_registry import FunctionRegistry
+from loopgraph.scheduler.scheduler import Scheduler
 
 # 1. Define handlers
 registry = FunctionRegistry()
@@ -105,7 +105,7 @@ The SWITCH handler returns `"done"` when the termination condition is met.
 ## Running Tests
 
 ```bash
-cd /Users/borui/Devs/open-source-general-agents/wormhole/eventflow
+# From the repository root
 
 # All tests
 python -m pytest tests/ -v
@@ -114,8 +114,8 @@ python -m pytest tests/ -v
 python -m pytest tests/test_integration_workflows.py -v
 
 # Doctest gate
-python -m pytest --doctest-modules eventflow/core/state.py
-python -m pytest --doctest-modules eventflow/scheduler/scheduler.py
+python -m pytest --doctest-modules loopgraph/core/state.py
+python -m pytest --doctest-modules loopgraph/scheduler/scheduler.py
 
 # Type check
 mypy

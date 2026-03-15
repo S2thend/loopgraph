@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from eventflow.bus.eventbus import Event, EventBus
-from eventflow.core.types import EventType
+from loopgraph.bus.eventbus import Event, EventBus
+from loopgraph.core.types import EventType
 
 
 def _make_event(event_id: str = "evt-1") -> Event:

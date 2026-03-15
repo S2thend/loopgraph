@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import asyncio
 
-from eventflow import log_parameter, log_variable_change
-from eventflow.bus.eventbus import EventBus
-from eventflow.concurrency.policies import SemaphorePolicy
-from eventflow.core.graph import Edge, Graph, Node
-from eventflow.core.state import ExecutionState
-from eventflow.core.types import EventType, NodeKind, VisitOutcome
-from eventflow.persistence import InMemoryEventLog, InMemorySnapshotStore
-from eventflow.registry.function_registry import FunctionRegistry
-from eventflow.scheduler.scheduler import Scheduler
+from loopgraph import log_parameter, log_variable_change
+from loopgraph.bus.eventbus import EventBus
+from loopgraph.concurrency.policies import SemaphorePolicy
+from loopgraph.core.graph import Edge, Graph, Node
+from loopgraph.core.state import ExecutionState
+from loopgraph.core.types import EventType, NodeKind, VisitOutcome
+from loopgraph.persistence import InMemoryEventLog, InMemorySnapshotStore
+from loopgraph.registry.function_registry import FunctionRegistry
+from loopgraph.scheduler.scheduler import Scheduler
 
 
 async def _run_scheduler(scheduler: Scheduler, graph: Graph) -> dict[str, object]:

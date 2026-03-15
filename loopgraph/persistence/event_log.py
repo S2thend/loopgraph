@@ -17,7 +17,7 @@ from ..bus.eventbus import Event
 class EventLog(Protocol):
     """Protocol for append-only event logs.
 
-    >>> from eventflow.core.types import EventType
+    >>> from loopgraph.core.types import EventType
     >>> log = InMemoryEventLog()
     >>> log.append(Event(id="evt", graph_id="g", node_id=None, type=EventType.NODE_COMPLETED))
     >>> [evt.type for evt in log.iter("g")]

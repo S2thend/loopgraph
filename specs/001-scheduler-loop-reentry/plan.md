@@ -17,7 +17,7 @@ on `ExecutionState`, and re-entry logic in `Scheduler._execute_node` / `run()`.
 **Storage**: N/A (in-memory state + optional pluggable snapshot/event stores)
 **Testing**: pytest + pytest-asyncio
 **Target Platform**: Any Python 3.10+ runtime
-**Project Type**: Single Python package (`eventflow`)
+**Project Type**: Single Python package (`loopgraph`)
 **Performance Goals**: Preserve steady-state scheduler complexity (no added graph-wide scans in the run loop)
 **Constraints**: Zero runtime deps, async-first API, PEP 561 typing
 
@@ -48,7 +48,7 @@ on `ExecutionState`, and re-entry logic in `Scheduler._execute_node` / `run()`.
       are serialized. `snapshot()`/`restore()` round-trips remain correct.
 - [x] **Docstring Doctest Coverage**: Plan includes doctests for `reset_for_reentry`
       and updated doctest gate via `tests/test_doctests.py`.
-- [x] **Debug Traceability**: All new control flow uses `eventflow._debug` helpers.
+- [x] **Debug Traceability**: All new control flow uses `loopgraph._debug` helpers.
       `reset_for_reentry` logs parameters and variable changes. Scheduler re-entry
       detection logs branch and variable changes.
 - [x] **Typing-First Contract**: `reset_for_reentry` is typed. `_execute_node`
@@ -88,7 +88,7 @@ specs/001-scheduler-loop-reentry/
 ### Source Code (repository root)
 
 ```text
-eventflow/
+loopgraph/
 ├── core/
 │   ├── graph.py         # MODIFY: add shared-node multi-loop validation
 │   └── state.py         # MODIFY: add reset_for_reentry()

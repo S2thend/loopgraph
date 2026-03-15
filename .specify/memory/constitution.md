@@ -19,7 +19,7 @@ Previous sync (1.5.2 → 1.5.3):
   Modified: XIV (disjoint loops, removed runtime hard-stop); Constraints: none
 -->
 
-# EventFlow2 Constitution
+# loopgraph Constitution
 
 ## Core Principles
 
@@ -30,8 +30,8 @@ responsibilities MUST stay limited to dependency resolution, handler dispatch,
 and state/event persistence. Domain-specific behavior (metrics, retries, side
 effects, remote orchestration) MUST live in handlers or external services. Any
 proposal to expand core modules MUST first show why the behavior cannot be
-composed outside `eventflow/core` and `eventflow/scheduler`. Core APIs MUST stay
-minimally opinionated to maximize user freedom in workflow design. EventFlow2's
+composed outside `loopgraph/core` and `loopgraph/scheduler`. Core APIs MUST stay
+minimally opinionated to maximize user freedom in workflow design. loopgraph's
 core is a graph execution engine; features outside graph execution semantics are
 out of scope unless required for correctness. Design decisions MUST follow
 Occam's razor: choose the smallest correct core behavior and push optional
@@ -56,7 +56,7 @@ operability, and failure analysis.
 
 Node readiness MUST be derived from explicit configuration (`config.required`,
 `allow_partial_upstream`, `max_visits`) plus terminal upstream outcomes.
-EventFlow2 MUST provide primitives that allow users to implement their own
+loopgraph MUST provide primitives that allow users to implement their own
 patterns (including fail-fast and error-tolerant flows) without the engine
 enforcing a single global failure strategy.
 
@@ -106,7 +106,7 @@ Rationale: executable examples keep documentation truthful and prevent drift.
 
 Runtime control-flow changes MUST emit structured debug traces for parameter
 inputs, return values, branch selection, loop progression, and variable updates
-using `eventflow._debug` helpers. Logs MUST be machine-parseable and stable in
+using `loopgraph._debug` helpers. Logs MUST be machine-parseable and stable in
 shape (for example, key-value fields or JSON), and SHOULD include `function`,
 `call_id`, `branch`, `loop_iter`, and `elapsed_ms` when applicable. Redaction
 policy is out of scope for this base dependency and is delegated to consuming
@@ -120,7 +120,7 @@ behavior stable and policy surface minimal.
 
 Public APIs MUST provide complete type annotations and preserve PEP 561 typing
 support. The `py.typed` marker file MUST be present in the published package.
-Changes to `eventflow/` MUST pass repository type-check configuration before
+Changes to `loopgraph/` MUST pass repository type-check configuration before
 merge.
 
 Rationale: strong typing improves correctness while keeping integration behavior
@@ -157,7 +157,7 @@ Platform decisions MUST prioritize broad runtime compatibility and low dependenc
 burden. Runtime dependencies MUST stay minimal and public API changes MUST include
 deprecation or migration guidance when behavior changes.
 
-Rationale: compatibility-first design keeps EventFlow deployable across diverse
+Rationale: compatibility-first design keeps LoopGraph deployable across diverse
 environments.
 
 ### XIV. Bounded Loop Semantics
@@ -204,17 +204,17 @@ observability guarantees of Principle XI.
   remain async (`Scheduler.run`, `EventBus.emit`, `FunctionRegistry.execute`).
   Synchronous wrappers are allowed only at the outermost boundary (tests,
   scripts, examples).
-- **Zero runtime dependencies**: The published `eventflow` package MUST NOT
+- **Zero runtime dependencies**: The published `loopgraph` package MUST NOT
   declare runtime dependencies in `[project.dependencies]`.
 - **License compatibility**: Contributions MUST remain compatible with MIT
   licensing.
 - **Type safety**: Public APIs MUST carry complete type annotations, and changes
-  to `eventflow/` MUST pass mypy using repository configuration
+  to `loopgraph/` MUST pass mypy using repository configuration
   (`pyproject.toml` `[tool.mypy]`).
-- **Formatting/linting**: Changes to `eventflow/` MUST pass `ruff check` using
+- **Formatting/linting**: Changes to `loopgraph/` MUST pass `ruff check` using
   repository configuration.
 - **Diagnostic instrumentation**: Non-trivial control flow changes in runtime
-  modules MUST use `eventflow._debug` logging helpers
+  modules MUST use `loopgraph._debug` logging helpers
   (`log_parameter`, `log_variable_change`, `log_branch`, `log_loop_iteration`).
 - **Debug logging release policy**: Development debug traces MUST be gated by
   `logging.getLogger` level configuration and MUST be disabled by default (level
@@ -236,14 +236,14 @@ observability guarantees of Principle XI.
 - **Spec and docs sync**: Changes to scheduler/state semantics MUST update
   affected docs and specs in the same change set (minimum: `README.md` plus
   impacted `docs/` or `specs/` files).
-- **Review and branch policy**: Changes under `eventflow/` MUST be reviewed
+- **Review and branch policy**: Changes under `loopgraph/` MUST be reviewed
   before merge. Feature branches MUST follow the numbered pattern
   `^[0-9]{3}-...` consistent with `.specify/scripts/bash/common.sh`. Hotfix and
   release branches are exempt from this naming convention.
 
 ## Governance
 
-This constitution is the highest-authority engineering policy for EventFlow2.
+This constitution is the highest-authority engineering policy for loopgraph.
 When plans, specs, tasks, or implementation choices conflict with this
 constitution, this document takes precedence.
 

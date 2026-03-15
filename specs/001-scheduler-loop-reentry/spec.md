@@ -117,7 +117,7 @@ A workflow operator monitors loop progress through the event log. Each time a lo
 
 - **Recovery and Persistence**: `reset_for_reentry` produces a state that is fully snapshot-compatible. The reset sets `status=PENDING`, clears `upstream_completed`, and removes from `_completed_nodes` — all of which are serialized fields. `snapshot()` / `restore()` round-trips remain correct (Principle VI).
 
-- **Debug & Logging Plan**: The new `reset_for_reentry` method MUST use `eventflow._debug` helpers (`log_parameter`, `log_variable_change`, `log_branch`) to trace the reset operation. The re-entry detection logic in the scheduler MUST log which nodes are being re-queued. All debug logging follows existing gating via `logging.getLogger` (Principle VIII).
+- **Debug & Logging Plan**: The new `reset_for_reentry` method MUST use `loopgraph._debug` helpers (`log_parameter`, `log_variable_change`, `log_branch`) to trace the reset operation. The re-entry detection logic in the scheduler MUST log which nodes are being re-queued. All debug logging follows existing gating via `logging.getLogger` (Principle VIII).
 
 - **Typing & Compatibility Plan**: `reset_for_reentry` is a new public method on `ExecutionState` — additive, no breaking change. The `_execute_node` return type changes from `Any` to `Tuple[Any, List[str]]` — this is an internal method (underscore-prefixed), so no public API impact. Type annotations MUST be complete and pass mypy (Principle IX).
 
@@ -140,7 +140,7 @@ A workflow operator monitors loop progress through the event log. Each time a lo
   - NFR overhead check: code review/test assertions confirm no additional graph-wide scan is added to steady-state scheduler loop.
   - Event observability test: `visit_count` on `NODE_COMPLETED` events is correct across re-entries.
   - Doctest: `reset_for_reentry` includes a docstring with executable example.
-  - Doctest gate: `python -m pytest --doctest-modules eventflow/core/state.py` passes.
+  - Doctest gate: `python -m pytest --doctest-modules loopgraph/core/state.py` passes.
   - Type check: `mypy` passes with repository configuration.
   - Lint: `ruff check` passes.
   - Snapshot round-trip test: `snapshot()` after re-entry correctly `restore()`s.

@@ -1,22 +1,22 @@
-"""Execute doctest suites for the EventFlow package."""
+"""Execute doctest suites for the LoopGraph package."""
 
 from __future__ import annotations
 
 import doctest
 
-import eventflow
-import eventflow._debug as debug_module
-import eventflow.bus.eventbus as eventbus_module
-import eventflow.concurrency.policies as policies_module
-import eventflow.diagnostics.inspect as diagnostics_module
-import eventflow.persistence.event_log as event_log_module
-import eventflow.persistence.snapshot as snapshot_module
-import eventflow.registry.function_registry as registry_module
-import eventflow.scheduler.scheduler as scheduler_module
-from eventflow import log_loop_iteration, log_parameter, log_variable_change
-from eventflow.core import graph as graph_module
-from eventflow.core import state as state_module
-from eventflow.core import types as types_module
+import loopgraph
+import loopgraph._debug as debug_module
+import loopgraph.bus.eventbus as eventbus_module
+import loopgraph.concurrency.policies as policies_module
+import loopgraph.diagnostics.inspect as diagnostics_module
+import loopgraph.persistence.event_log as event_log_module
+import loopgraph.persistence.snapshot as snapshot_module
+import loopgraph.registry.function_registry as registry_module
+import loopgraph.scheduler.scheduler as scheduler_module
+from loopgraph import log_loop_iteration, log_parameter, log_variable_change
+from loopgraph.core import graph as graph_module
+from loopgraph.core import state as state_module
+from loopgraph.core import types as types_module
 
 
 def test_doctests() -> None:
@@ -24,7 +24,7 @@ def test_doctests() -> None:
     func_name = "test_doctests"
     log_parameter(func_name)
     modules = [
-        eventflow,
+        loopgraph,
         debug_module,
         graph_module,
         types_module,

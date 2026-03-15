@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import time
 
-from eventflow.bus.eventbus import Event, EventBus
-from eventflow.core.types import EventType
+from loopgraph.bus.eventbus import Event, EventBus
+from loopgraph.core.types import EventType
 
 
 class DoubleBufferedQueue:

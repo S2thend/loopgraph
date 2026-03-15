@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from eventflow.concurrency import PrioritySemaphorePolicy
+from loopgraph.concurrency import PrioritySemaphorePolicy
 
 
 def test_priority_policy_orders_tasks() -> None:

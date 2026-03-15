@@ -5,14 +5,14 @@ from typing import Iterable, Mapping, cast
 
 import pytest
 
-from eventflow.bus.eventbus import EventBus
-from eventflow.concurrency import PrioritySemaphorePolicy
-from eventflow.core.graph import Edge, Graph, Node
-from eventflow.core.state import ExecutionState
-from eventflow.core.types import EventType, NodeKind, NodeStatus, VisitOutcome
-from eventflow.persistence import InMemoryEventLog, InMemorySnapshotStore
-from eventflow.registry.function_registry import FunctionRegistry
-from eventflow.scheduler.scheduler import Scheduler
+from loopgraph.bus.eventbus import EventBus
+from loopgraph.concurrency import PrioritySemaphorePolicy
+from loopgraph.core.graph import Edge, Graph, Node
+from loopgraph.core.state import ExecutionState
+from loopgraph.core.types import EventType, NodeKind, NodeStatus, VisitOutcome
+from loopgraph.persistence import InMemoryEventLog, InMemorySnapshotStore
+from loopgraph.registry.function_registry import FunctionRegistry
+from loopgraph.scheduler.scheduler import Scheduler
 
 
 def test_complex_workflow_with_switch_and_merge() -> None:

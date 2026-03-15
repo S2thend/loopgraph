@@ -1,4 +1,4 @@
-"""Core domain models for EventFlow."""
+"""Core domain models for LoopGraph."""
 
 from .graph import Edge, Graph, Node
 from .state import ExecutionState, NodeRuntimeState, NodeVisit

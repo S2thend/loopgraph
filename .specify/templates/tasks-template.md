@@ -158,7 +158,7 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX [P] Additional unit/integration/contract tests in tests/
 - [ ] TXXX Run doctest coverage (for example `tests/test_doctests.py`)
 - [ ] TXXX Run `ruff check` for changed modules
-- [ ] TXXX Run mypy checks for `eventflow/` changes
+- [ ] TXXX Run mypy checks for `loopgraph/` changes
 - [ ] TXXX Validate structured debug traces for changed control flow (params,
           return values, variable changes, branch/loop signals)
 - [ ] TXXX Verify debug tracing is disabled/stripped for release packaging
