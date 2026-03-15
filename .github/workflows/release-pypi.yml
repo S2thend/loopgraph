@@ -9,6 +9,7 @@ jobs:
   release:
     name: Build and publish
     runs-on: ubuntu-latest
+    environment: pypi
     permissions:
       contents: read
       id-token: write
@@ -39,10 +40,13 @@ jobs:
 
           PROJECT_VERSION="$(python - <<'PY'
           import pathlib
-          import tomllib
+          import re
 
-          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
-          print(data["project"]["version"])
+          text = pathlib.Path("pyproject.toml").read_text()
+          match = re.search(r'(?m)^version\s*=\s*"([^"]+)"\s*$', text)
+          if match is None:
+              raise SystemExit("Could not find project version in pyproject.toml")
+          print(match.group(1))
           PY
           )"
           TAG_VERSION="${TAG_NAME#v}"
