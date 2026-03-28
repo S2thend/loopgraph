@@ -42,6 +42,7 @@ documentation examples are touched.
 - [ ] T004 Update `Scheduler.run()` loop to add activated targets to `pending` after each node completion in loopgraph/scheduler/scheduler.py — iterate `activated_targets` from T003 and `pending.add(target)` for targets not already completed
 - [ ] T005 Add resume-path pending seeding in `Scheduler.run()` in loopgraph/scheduler/scheduler.py — when snapshot has state, seed pending from (a) uncompleted entry nodes, (b) PENDING nodes in snapshot, (c) RUNNING nodes in snapshot (reset RUNNING to PENDING in execution state)
 - [ ] T006 Add `log_variable_change` debug traces for new pending-set initialization and growth points in loopgraph/scheduler/scheduler.py
+- [ ] T006b Change `_determine_downstream_edges` to raise `ValueError` when a SWITCH node's route matches no downstream edge and no exit/fallback edge exists (FR-013) in loopgraph/scheduler/scheduler.py — replace the `return []` at line 477 with a `ValueError`
 
 **Checkpoint**: Scheduler uses activation-frontier semantics. Existing doctests in `Scheduler` class still pass.
 
@@ -125,6 +126,10 @@ documentation examples are touched.
 **Purpose**: Quality gates and constitution compliance
 
 - [ ] T019 [P] Test zero-entry-nodes graph raises `ValueError` with explicit message in tests/test_integration_workflows.py
+- [ ] T019b [P] Test genuinely stuck graph (activated node that can never become ready) raises `RuntimeError` in tests/test_integration_workflows.py
+- [ ] T019c [P] Test TERMINAL node used as SWITCH leaf schedules like TASK under activation-frontier in tests/test_integration_workflows.py
+- [ ] T019d [P] Test SWITCH with no matching route raises `ValueError` in tests/test_integration_workflows.py
+- [ ] T019e [P] Test exhausted SWITCH branches fall back to exit edge under activation-frontier in tests/test_integration_workflows.py
 - [ ] T020 [P] Run `tests/test_doctests.py` to verify all doctests pass — `pytest tests/test_doctests.py`
 - [ ] T021 [P] Run `ruff check loopgraph/` for changed modules
 - [ ] T022 [P] Run mypy type checks for `loopgraph/` changes

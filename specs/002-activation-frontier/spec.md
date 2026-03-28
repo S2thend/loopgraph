@@ -82,7 +82,7 @@ A workflow contains an AGGREGATE node that requires multiple upstream completion
 
 ### Edge Cases
 
-- What happens when a SWITCH returns a route that matches no downstream edge? The scheduler should handle this gracefully (existing behavior: returns empty selected edges, node has no downstream to activate).
+- What happens when a SWITCH returns a route that matches no downstream edge? The scheduler MUST raise a `ValueError` identifying the unmatched route and the SWITCH node.
 - What happens when all downstream branches of a SWITCH are exhausted (`max_visits` reached)? The exit/fallback edge logic should still apply.
 - What happens when a graph has no entry nodes (all nodes have upstream edges)? The scheduler fails fast with a `ValueError` that explicitly reports the graph has no entry nodes.
 - What happens when a resumed snapshot contains a node in RUNNING state? The scheduler resets it to PENDING and adds it to the activation frontier, since RUNNING in a snapshot means the node never finished.
@@ -103,6 +103,7 @@ A workflow contains an AGGREGATE node that requires multiple upstream completion
 - **FR-010**: Correctness on resume is guaranteed only for snapshots produced by scheduler versions that implement activation-frontier semantics. Snapshots produced by earlier scheduler versions are out of scope for this feature and may require discard or explicit migration.
 - **FR-011**: On a fresh run, if the graph has zero entry nodes, the scheduler MUST fail fast with a `ValueError` that explicitly reports the graph has no entry nodes.
 - **FR-012**: This feature MUST NOT change the runtime semantics of `NodeKind.TERMINAL`; terminal nodes continue to follow the same scheduling behavior as task nodes.
+- **FR-013**: When a SWITCH node's handler returns a route that matches no downstream edge and no exit/fallback edge exists, the scheduler MUST raise a `ValueError` identifying the unmatched route and the SWITCH node. Silent no-op completion of a SWITCH with zero activated downstream is not allowed.
 
 ### Key Entities
 
@@ -127,6 +128,10 @@ A workflow contains an AGGREGATE node that requires multiple upstream completion
   - New test: resume from snapshot with already-activated pending node.
   - New test: merge/aggregate nodes sit in pending until enough upstreams complete.
   - New test: fresh run with zero entry nodes raises `ValueError` with an explicit no-entry-nodes message.
+  - New test: genuinely stuck graph (activated node that can never become ready) still raises `RuntimeError`.
+  - New test: TERMINAL node used as SWITCH leaf schedules like TASK under activation-frontier.
+  - New test: SWITCH with no matching route raises `ValueError`.
+  - New test: exhausted SWITCH branches fall back to exit edge under activation-frontier.
   - `ruff check` must pass.
   - Type checking must pass.
   - `tests/test_doctests.py` must pass.
@@ -141,3 +146,4 @@ A workflow contains an AGGREGATE node that requires multiple upstream completion
 - **SC-004**: Aggregate nodes in fan-out/fan-in graphs continue to wait for the required number of upstream completions before executing.
 - **SC-005**: The scheduler's deadlock detection still raises `RuntimeError` for genuinely stuck graphs (e.g., circular dependencies with no entry point).
 - **SC-006**: A fresh run on a graph with zero entry nodes fails immediately with a `ValueError` that explicitly identifies the missing-entry-node condition.
+- **SC-007**: A SWITCH node returning a route that matches no downstream edge raises a `ValueError` instead of silently completing with no activation.

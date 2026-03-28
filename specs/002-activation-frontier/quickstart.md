@@ -40,6 +40,17 @@ branch nodes stuck in `pending` forever.
   snapshots created by this version or later. Old snapshots may need to be
   discarded.
 - **New `Graph.entry_nodes()` method** available for querying graph entry points.
+- **SWITCH no-match route now raises.** Previously, a SWITCH returning a route
+  that matched no downstream edge silently completed with no activation. Now it
+  raises `ValueError`.
+
+## Migration: Old Snapshots
+
+Snapshots created by scheduler versions before activation-frontier semantics may
+contain PENDING state for nodes that were never truly activated. The new resume
+logic cannot distinguish these from genuinely activated nodes. If you have
+persisted snapshots from the old scheduler, discard them or migrate manually
+before resuming with the new version.
 
 ## New Behavior: Zero Entry Nodes
 

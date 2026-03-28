@@ -22,7 +22,7 @@ zero entry nodes.
 **Project Type**: Single Python package (`loopgraph`)
 **Performance Goals**: Preserve steady-state scheduler complexity (no added graph-wide scans in the run loop)
 **Constraints**: Zero runtime deps, async-first API, PEP 561 typing
-**Scale/Scope**: Single method change in `Scheduler.run()` + 6 new tests
+**Scale/Scope**: Single method change in `Scheduler.run()` + new tests
 
 ## Constitution Check
 
@@ -209,3 +209,20 @@ for node_id, node_state in snapshot_data.get("states", {}).items():
         state = execution_state._ensure_state(node_id)
         state.status = NodeStatus.PENDING
 ```
+
+### Change 6: SWITCH no-match route raises ValueError
+
+In `_determine_downstream_edges`, the current code returns `[]` when no route
+matches and no exit edge exists (scheduler.py:476-477). Change this to raise
+`ValueError` identifying the unmatched route and the SWITCH node:
+
+```python
+# Replace the silent return []
+raise ValueError(
+    f"Switch node '{node.id}' returned route '{route}' "
+    f"which matches no downstream edge"
+)
+```
+
+This ensures SWITCH nodes always activate at least one downstream target or
+explicitly fail. Silent no-op completion is no longer allowed.
