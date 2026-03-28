@@ -5,12 +5,15 @@
 
 ## Summary
 
-Fix the scheduler deadlock caused by seeding `pending` with all graph nodes. Change
-`Scheduler.run()` to seed `pending` from entry nodes only (fresh run) or from
-snapshot state (resume), and grow it dynamically as edges are actually activated
-after node completion. This ensures unselected SWITCH branches never enter the
-pending set and cannot block progress. Add a `ValueError` guard for graphs with
-zero entry nodes.
+Fix the scheduler deadlock caused by seeding `pending` with all graph nodes. Add
+`Graph.entry_nodes()`, version supported recovery snapshots with
+`snapshot_format_version`, teach `Scheduler.run()` to seed `pending` from entry
+nodes or supported snapshot state, and grow it dynamically as edges are actually
+activated after node completion. Update `_execute_node()` to return activated
+targets and change `_determine_downstream_edges()` to raise `ValueError` for
+unmatched SWITCH routes. This ensures unselected SWITCH branches never enter the
+pending set, unsupported legacy snapshots fail fast with explicit guidance, and
+graphs with zero entry nodes raise `ValueError`.
 
 ## Technical Context
 
@@ -20,19 +23,19 @@ zero entry nodes.
 **Testing**: pytest + pytest-asyncio
 **Target Platform**: Any Python 3.10+ runtime
 **Project Type**: Single Python package (`loopgraph`)
-**Performance Goals**: Preserve steady-state scheduler complexity (no added graph-wide scans in the run loop)
+**Performance Goals**: Preserve steady-state scheduler complexity by adding no full-graph scan inside the `while pending` loop after initial seeding
 **Constraints**: Zero runtime deps, async-first API, PEP 561 typing
-**Scale/Scope**: Single method change in `Scheduler.run()` + new tests
+**Scale/Scope**: `Graph.entry_nodes()`, `ExecutionState` snapshot metadata, `Scheduler.run()` / `_execute_node()` / `_determine_downstream_edges()`, README updates, and new tests
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- [x] **Compact Core**: Change is limited to `Scheduler.run()` pending-set
-      initialization and growth logic — dependency resolution is an explicit
-      scheduler responsibility. No domain-specific behavior introduced. The
-      `Graph` class gains a trivial `entry_nodes()` helper that queries existing
-      adjacency data.
+- [x] **Compact Core**: Change stays within `Graph`, `ExecutionState`, and
+      `Scheduler` core execution helpers — dependency resolution and recovery
+      semantics are explicit engine responsibilities. No domain-specific behavior
+      is introduced. `Graph` gains a trivial `entry_nodes()` query and
+      `ExecutionState` gains explicit snapshot format metadata.
 - [x] **Edge-Heavy Work**: No long-running or distributed work added. Pending-set
       growth is O(out-degree) per completed node, fully within the async loop.
 - [x] **Flexible Aggregation Semantics**: `is_ready()` semantics unchanged.
@@ -43,13 +46,14 @@ zero entry nodes.
       policy.
 - [x] **Pluggable Concurrency**: No change to `ConcurrencyManager`. Activated
       nodes acquire slots via the same path.
-- [x] **Snapshot-First Recovery**: Snapshot format unchanged. Resume seeds pending
-      from PENDING/RUNNING nodes in snapshot + uncompleted entry nodes. RUNNING
-      nodes are reset to PENDING (clarification from spec). Old snapshots are
-      out of scope per FR-010.
-- [x] **Docstring Doctest Coverage**: Existing doctests in `Scheduler` class
-      continue to work (they use graphs with entry nodes). New `entry_nodes()`
-      helper gets a doctest. `tests/test_doctests.py` must pass.
+- [x] **Snapshot-First Recovery**: Supported recovery snapshots now carry an
+      explicit `snapshot_format_version`. Resume seeds pending from
+      PENDING/RUNNING nodes in supported snapshots + uncompleted entry nodes.
+      RUNNING nodes are reset to PENDING. Unsupported or missing snapshot
+      versions are rejected explicitly with discard-or-migrate guidance.
+- [x] **Docstring Doctest Coverage**: Existing doctests in `Scheduler` and
+      `ExecutionState` must stay green after the pending/recovery payload changes.
+      New `entry_nodes()` gets a doctest. `tests/test_doctests.py` must pass.
 - [x] **Debug Traceability**: New pending-set initialization and growth points
       emit `log_variable_change` traces. Existing debug logging unchanged.
 - [x] **Typing-First Contract**: No public API changes. `Scheduler.run()`
@@ -59,18 +63,21 @@ zero entry nodes.
 - [x] **Abstraction & Decoupling**: No new interfaces. Changes stay within
       existing `Scheduler`/`Graph`/`ExecutionState` boundary.
 - [x] **Compatibility First**: No public API breakage. No new runtime deps.
-      Internal pending-set logic is private.
+      Persisted-state compatibility is handled through explicit snapshot
+      versioning and rejection guidance for unsupported versions.
 - [x] **Bounded Loop Semantics**: `max_visits` enforcement preserved. Re-entry
       targets are re-added to pending via existing `reentry_targets` path.
 - [x] **Explicit Error Propagation**: New `ValueError` for zero entry nodes is
       explicit. Deadlock `RuntimeError` preserved. No silent suppression.
-- [x] **Quality Gates**: Plan includes pytest, ruff check, mypy, doctest gate.
+- [x] **Quality Gates**: Plan includes pytest, ruff check, mypy, doctest gate,
+      performance-constraint validation, and README/docs sync.
 
 ## Project Structure
 
 ### Documentation (this feature)
 
 ```text
+README.md                # MODIFY: document activation-frontier semantics and recovery boundary
 specs/002-activation-frontier/
 ├── plan.md              # This file
 ├── research.md          # Phase 0 output
@@ -84,18 +91,21 @@ specs/002-activation-frontier/
 ```text
 loopgraph/
 ├── core/
-│   └── graph.py         # MODIFY: add entry_nodes() helper
+│   ├── graph.py         # MODIFY: add entry_nodes() helper
+│   └── state.py         # MODIFY: add snapshot format version metadata
 ├── scheduler/
-│   └── scheduler.py     # MODIFY: pending-set init + growth in run()
+│   └── scheduler.py     # MODIFY: supported resume, pending growth, route errors
 tests/
 ├── test_integration_workflows.py  # MODIFY: add activation-frontier tests
-├── test_scheduler_recovery.py     # MODIFY: add resume-with-activation tests
+├── test_scheduler_recovery.py     # MODIFY: add supported/unsupported resume tests
 └── test_doctests.py               # VERIFY: passes with new doctests
 ```
 
 **Structure Decision**: Single Python package. All changes are within existing
 modules — no new files needed. `entry_nodes()` is added to `Graph` as a query
-helper (consistent with existing `downstream_nodes()`, `upstream_nodes()`).
+helper (consistent with existing `downstream_nodes()`, `upstream_nodes()`), and
+snapshot format metadata is added to `ExecutionState` to make supported recovery
+boundaries explicit.
 
 ## Complexity Tracking
 
@@ -121,7 +131,28 @@ def entry_nodes(self) -> List[Node]:
 
 Include a doctest. Emit debug logging.
 
-### Change 2: `Scheduler.run()` pending-set initialization
+### Change 2: Snapshot format versioning for supported recovery
+
+Supported activation-frontier snapshots carry an explicit
+`snapshot_format_version`. This makes the recovery boundary machine-checkable and
+allows the scheduler to reject legacy snapshots from older semantics instead of
+guessing whether historical `PENDING` state was truly activated.
+
+```python
+SNAPSHOT_FORMAT_VERSION = 2
+
+payload = {
+    "snapshot_format_version": SNAPSHOT_FORMAT_VERSION,
+    "states": states_payload,
+    "completed_nodes": sorted(self._completed_nodes),
+}
+```
+
+Unsupported snapshots are rejected by `Scheduler` before restore. Supported
+snapshots remain JSON-serializable and continue to restore completed nodes
+without re-executing them.
+
+### Change 3: `Scheduler.run()` pending-set initialization and supported resume
 
 Replace line 190:
 ```python
@@ -141,6 +172,15 @@ pending = set(entry_ids)
 
 **Resume** (snapshot has state):
 ```python
+version = snapshot_data.get("snapshot_format_version")
+if version != SUPPORTED_SNAPSHOT_FORMAT_VERSION:
+    raise ValueError(
+        "Unsupported snapshot format version "
+        f"{version!r}; supported version is "
+        f"{SUPPORTED_SNAPSHOT_FORMAT_VERSION}. "
+        "Discard or migrate the snapshot before resuming."
+    )
+
 entry_ids = {n.id for n in graph.entry_nodes()}
 pending = set()
 # Add uncompleted entry nodes
@@ -158,7 +198,11 @@ for node_id, node_state in snapshot_data.get("states", {}).items():
 For RUNNING nodes on resume: reset them to PENDING in the execution state so
 `is_ready()` can evaluate them.
 
-### Change 3: `Scheduler.run()` pending-set growth on node completion
+The full snapshot scan stays outside the `while pending` loop. After the loop
+starts, pending growth must be driven only by activated targets and re-entry
+targets so the run-loop complexity does not add a new graph-wide scan.
+
+### Change 4: `Scheduler.run()` pending-set growth on node completion
 
 After `_execute_node` returns, the current code does:
 ```python
@@ -189,12 +233,12 @@ for reentry_target in reentry_targets:
     pending.add(reentry_target)
 ```
 
-### Change 4: Zero entry nodes guard
+### Change 5: Zero entry nodes guard
 
 Before the `while pending` loop, if the graph has nodes but `pending` is empty
 (and no snapshot state), raise `ValueError`.
 
-### Change 5: RUNNING node reset on resume
+### Change 6: RUNNING node reset on resume
 
 When seeding pending from snapshot, if a node has RUNNING status, call
 `execution_state.mark_running()` is already done — but we need to reset it back
@@ -210,7 +254,7 @@ for node_id, node_state in snapshot_data.get("states", {}).items():
         state.status = NodeStatus.PENDING
 ```
 
-### Change 6: SWITCH no-match route raises ValueError
+### Change 7: SWITCH no-match route raises ValueError
 
 In `_determine_downstream_edges`, the current code returns `[]` when no route
 matches and no exit edge exists (scheduler.py:476-477). Change this to raise
@@ -226,3 +270,11 @@ raise ValueError(
 
 This ensures SWITCH nodes always activate at least one downstream target or
 explicitly fail. Silent no-op completion is no longer allowed.
+
+### Change 8: Documentation sync and operator guidance
+
+Update `README.md` to describe the activation-frontier pending model, the new
+zero-entry-node validation error, unmatched SWITCH route failure, and the
+explicit rejection of unsupported snapshot versions. The README is the minimum
+required runtime-facing documentation update for this scheduler/state semantic
+change.

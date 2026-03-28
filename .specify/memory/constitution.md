@@ -1,22 +1,20 @@
 <!--
 Sync Impact Report
 ===================
-Version change: 1.5.3 → 1.5.4
+Version change: 1.5.4 → 2.0.0
 Modified principles:
-  - XIV. Bounded Loop Semantics: re-added runtime hard-stop for PENDING/RUNNING
-    back-edge targets as defensive fallback; added SWITCH self-loop rejection
-    at graph validation
+  - VI. Snapshot-First Recovery: allow explicit version-gated rejection of
+    unsupported snapshot formats, with operator guidance
+  - XIII. Compatibility First: require migration or explicit rejection guidance
+    for persisted-state compatibility boundaries
 Removed sections: none
 Added sections: none
 Technical Constraints changes: none
 Development Workflow changes: none
 Governance changes: none
 Templates requiring updates:
-  - No template changes required (principle clarification)
+  - No template changes required
 Follow-up TODOs: none
-
-Previous sync (1.5.2 → 1.5.3):
-  Modified: XIV (disjoint loops, removed runtime hard-stop); Constraints: none
 -->
 
 # loopgraph Constitution
@@ -85,10 +83,15 @@ throughput tradeoffs visible.
 
 ### VI. Snapshot-First Recovery
 
-Execution-state changes MUST preserve `ExecutionState.snapshot()` /
-`ExecutionState.restore()` compatibility and JSON-serializable payloads.
-Scheduler recovery paths MUST support resuming already-completed nodes from
-snapshots without re-executing them when prior state exists. Event logs, when
+Execution-state changes MUST preserve JSON-serializable payloads. Recovery-
+compatible producers and consumers MUST either preserve
+`ExecutionState.snapshot()` / `ExecutionState.restore()` compatibility for
+supported snapshot versions or introduce an explicit snapshot format version
+with documented migration or rejection behavior. Scheduler recovery paths MUST
+support resuming already-completed nodes from supported snapshots without
+re-executing them when prior state exists. Unsupported snapshot versions MAY be
+rejected explicitly at resume time, but the rejection MUST identify the
+unsupported version boundary and recommended operator action. Event logs, when
 configured, MUST remain append-only.
 
 Rationale: resumability and replayable traces are required for long-running
@@ -154,8 +157,9 @@ Rationale: controlled abstraction preserves flexibility without over-engineering
 ### XIII. Compatibility First
 
 Platform decisions MUST prioritize broad runtime compatibility and low dependency
-burden. Runtime dependencies MUST stay minimal and public API changes MUST include
-deprecation or migration guidance when behavior changes.
+burden. Runtime dependencies MUST stay minimal and public API or persisted-state
+compatibility changes MUST include deprecation, migration, or explicit
+version-gated rejection guidance when behavior changes.
 
 Rationale: compatibility-first design keeps LoopGraph deployable across diverse
 environments.
@@ -276,4 +280,4 @@ constitution, this document takes precedence.
   including user-defined failure-pattern tests where applicable.
 - Every pull request MUST state how constitution compliance was validated.
 
-**Version**: 1.5.4 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-02-28
+**Version**: 2.0.0 | **Ratified**: 2026-02-14 | **Last Amended**: 2026-03-29

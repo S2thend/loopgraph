@@ -37,14 +37,15 @@ documentation examples are touched.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T002 Change `Scheduler.run()` pending-set initialization to seed from entry nodes only (fresh run) in loopgraph/scheduler/scheduler.py — replace line 190 `pending = {node_id for node_id in graph.nodes if node_id not in completed_nodes}` with `pending = {n.id for n in graph.entry_nodes()}` guarded by the zero-entry-nodes `ValueError` (FR-011)
+- [ ] T002 Change `Scheduler.run()` pending-set initialization to seed from entry nodes only (fresh run) in loopgraph/scheduler/scheduler.py — replace line 190 `pending = {node_id for node_id in graph.nodes if node_id not in completed_nodes}` with `pending = {n.id for n in graph.entry_nodes()}` guarded by the zero-entry-nodes `ValueError` (FR-012)
 - [ ] T003 Change `Scheduler._execute_node()` return type from `Tuple[Any, List[str]]` to `Tuple[Any, List[str], List[str]]` (result, reentry_targets, activated_targets) in loopgraph/scheduler/scheduler.py — collect targets from the `initial_pending_target` branch into `activated_targets` and return them
 - [ ] T004 Update `Scheduler.run()` loop to add activated targets to `pending` after each node completion in loopgraph/scheduler/scheduler.py — iterate `activated_targets` from T003 and `pending.add(target)` for targets not already completed
-- [ ] T005 Add resume-path pending seeding in `Scheduler.run()` in loopgraph/scheduler/scheduler.py — when snapshot has state, seed pending from (a) uncompleted entry nodes, (b) PENDING nodes in snapshot, (c) RUNNING nodes in snapshot (reset RUNNING to PENDING in execution state)
-- [ ] T006 Add `log_variable_change` debug traces for new pending-set initialization and growth points in loopgraph/scheduler/scheduler.py
-- [ ] T006b Change `_determine_downstream_edges` to raise `ValueError` when a SWITCH node's route matches no downstream edge and no exit/fallback edge exists (FR-013) in loopgraph/scheduler/scheduler.py — replace the `return []` at line 477 with a `ValueError`
+- [ ] T005 Add `snapshot_format_version` metadata for supported activation-frontier snapshots in loopgraph/core/state.py and keep `ExecutionState.snapshot()` / `restore()` aligned for supported versions (FR-010)
+- [ ] T005b Add supported-snapshot resume seeding and explicit legacy snapshot rejection in loopgraph/scheduler/scheduler.py — reject missing or unsupported `snapshot_format_version` with `ValueError`, then seed pending from (a) uncompleted entry nodes, (b) PENDING nodes in snapshot, (c) RUNNING nodes reset to PENDING (FR-006, FR-011)
+- [ ] T006 Add `log_variable_change` / `log_branch` debug traces for fresh-run seeding, supported snapshot seeding, legacy snapshot rejection, and pending growth points in loopgraph/scheduler/scheduler.py
+- [ ] T006b Change `_determine_downstream_edges` to raise `ValueError` when a SWITCH node's route matches no downstream edge and no exit/fallback edge exists (FR-014) in loopgraph/scheduler/scheduler.py — replace the `return []` at line 477 with a `ValueError`
 
-**Checkpoint**: Scheduler uses activation-frontier semantics. Existing doctests in `Scheduler` class still pass.
+**Checkpoint**: Scheduler uses activation-frontier semantics for fresh runs and supported snapshots. Unsupported snapshots fail fast. Existing doctests in `Scheduler` class still pass.
 
 ---
 
@@ -62,7 +63,7 @@ documentation examples are touched.
 
 ### Validation for User Story 1
 
-- [ ] T010 [US1] Run all existing tests to confirm no regressions — `pytest tests/`
+- [ ] T010 [US1] Run an interim full regression checkpoint immediately after US1 to confirm the activation-frontier baseline introduces no broad regressions — `pytest tests/`
 
 **Checkpoint**: SWITCH-to-leaf-branch deadlock is fixed. Issue #5 scenario passes.
 
@@ -70,7 +71,7 @@ documentation examples are touched.
 
 ## Phase 4: User Story 2 — Loop re-entry with SWITCH still works (Priority: P1)
 
-**Goal**: Existing loop/re-entry behavior is preserved — SWITCH can route back to an earlier node on some iterations and exit on the final iteration.
+**Goal**: Existing loop/re-entry behavior is preserved — SWITCH can route back to an earlier node on some iterations and exit on the final iteration, while activation-frontier pending updates still re-add eligible re-entry targets.
 
 **Independent Test**: Run existing loop tests (`test_scheduler_bounded_loop_reentry`, `test_scheduler_loop_max_visits_1`, `test_scheduler_unbounded_loop_handler_exit`, `test_scheduler_disjoint_loops_execute`).
 
@@ -80,7 +81,7 @@ documentation examples are touched.
 
 ### Validation for User Story 2
 
-- [ ] T012 [US2] If any loop test fails, fix the activation-frontier logic in loopgraph/scheduler/scheduler.py to ensure re-entry targets are correctly re-added to pending
+- [ ] T012 [US2] Audit and update activation-frontier re-entry handling in loopgraph/scheduler/scheduler.py so eligible re-entry targets are always re-added to `pending` and the loop regression suite in T011 passes without changing existing loop test expectations
 
 **Checkpoint**: All loop/re-entry tests pass. No regression.
 
@@ -88,15 +89,17 @@ documentation examples are touched.
 
 ## Phase 5: User Story 3 — Resume from snapshot with activated pending nodes (Priority: P2)
 
-**Goal**: On resume, only activated nodes (PENDING/RUNNING in snapshot + uncompleted entry nodes) enter pending. Never-activated nodes are excluded.
+**Goal**: On resume from a supported snapshot, only activated nodes (PENDING/RUNNING in snapshot + uncompleted entry nodes) enter pending. Never-activated nodes are excluded, and unsupported snapshot versions are rejected explicitly.
 
-**Independent Test**: Create a snapshot with COMPLETED, PENDING, RUNNING, and absent nodes. Resume and verify correct pending set.
+**Independent Test**: Create a supported snapshot with COMPLETED, PENDING, RUNNING, and absent nodes. Resume and verify correct pending set. Also verify unsupported versions fail fast.
 
 ### Tests for User Story 3 (REQUIRED) ✅
 
 - [ ] T013 [P] [US3] Test resume with PENDING node in snapshot — node enters pending and executes — in tests/test_scheduler_recovery.py
 - [ ] T014 [P] [US3] Test resume with RUNNING node in snapshot — node is reset to PENDING and executes — in tests/test_scheduler_recovery.py
 - [ ] T015 [P] [US3] Test resume with never-activated node (no state entry, has upstream edges) — node does NOT enter pending — in tests/test_scheduler_recovery.py
+- [ ] T015b [P] [US3] Test resume with missing or unsupported `snapshot_format_version` — scheduler raises `ValueError`, does not execute nodes, and the error text includes the actual version, the supported version, and discard-or-migrate guidance — in tests/test_scheduler_recovery.py
+- [ ] T015c [P] [US3] Test persisted supported snapshots include `snapshot_format_version` with the expected supported value — in tests/test_scheduler_recovery.py
 
 ### Validation for User Story 3
 
@@ -133,9 +136,11 @@ documentation examples are touched.
 - [ ] T020 [P] Run `tests/test_doctests.py` to verify all doctests pass — `pytest tests/test_doctests.py`
 - [ ] T021 [P] Run `ruff check loopgraph/` for changed modules
 - [ ] T022 [P] Run mypy type checks for `loopgraph/` changes
-- [ ] T023 Validate structured debug traces for new pending-set control flow (log_variable_change, log_branch calls) in loopgraph/scheduler/scheduler.py
-- [ ] T024 Verify loop re-entry paths still respect `max_visits` enforcement and visit-count tracking (Principle XIV)
-- [ ] T025 Run full test suite — `pytest tests/` — final regression check
+- [ ] T023 [P] Inspect loopgraph/scheduler/scheduler.py to confirm the activation-frontier change adds no iteration over all graph nodes or all snapshot states inside the `while pending` loop; pending growth must be driven only by activated targets and re-entry targets (NFR-001)
+- [ ] T024 [P] Validate structured debug traces for fresh-run seeding, supported snapshot seeding, legacy snapshot rejection, and pending growth in loopgraph/scheduler/scheduler.py (`log_variable_change`, `log_branch`)
+- [ ] T025 [P] Add or update a regression test in tests/test_integration_workflows.py confirming activation-frontier loop re-entry still respects `max_visits` enforcement and visit-count tracking (Principle XIV)
+- [ ] T026 [P] Update README.md to document activation-frontier pending semantics, zero-entry-node failure, unmatched SWITCH route failure, and unsupported snapshot version rejection guidance
+- [ ] T027 Run full test suite — `pytest tests/` — final pre-merge regression check
 
 **Checkpoint**: All quality gates pass. Feature is complete.
 
@@ -149,7 +154,7 @@ documentation examples are touched.
 - **Foundational (Phase 2)**: Depends on Phase 1 (T001) — BLOCKS all user stories
 - **US1 (Phase 3)**: Depends on Phase 2 completion
 - **US2 (Phase 4)**: Depends on Phase 2 completion — can run in parallel with US1
-- **US3 (Phase 5)**: Depends on Phase 2 completion (specifically T005) — can run in parallel with US1/US2
+- **US3 (Phase 5)**: Depends on Phase 2 completion (specifically T005 and T005b) — can run in parallel with US1/US2
 - **US4 (Phase 6)**: Depends on Phase 2 completion — can run in parallel with US1/US2/US3
 - **Polish (Phase 7)**: Depends on all user stories being complete
 
@@ -169,8 +174,8 @@ documentation examples are touched.
 ### Parallel Opportunities
 
 - T007, T008, T009 can run in parallel (different test functions, same file)
-- T013, T014, T015 can run in parallel (different test functions, same file)
-- T019, T020, T021, T022 can run in parallel (independent quality checks)
+- T013, T014, T015, T015b, T015c can run in parallel (different test functions, same file)
+- T019, T019b, T019c, T019d, T019e, T020, T021, T022, T023, T024, T026 can run in parallel (independent quality checks)
 - US1, US2, US3, US4 can all proceed in parallel after Phase 2
 
 ---
@@ -180,7 +185,7 @@ documentation examples are touched.
 ### MVP First (User Story 1 Only)
 
 1. Complete Phase 1: Setup (T001)
-2. Complete Phase 2: Foundational (T002–T006)
+2. Complete Phase 2: Foundational (T002, T003, T004, T005, T005b, T006, T006b)
 3. Complete Phase 3: User Story 1 (T007–T010)
 4. **STOP and VALIDATE**: SWITCH-to-leaf deadlock is fixed, issue #5 resolved
 5. Deploy/demo if ready
@@ -201,5 +206,5 @@ documentation examples are touched.
 - [P] tasks = different files or independent test functions, no dependencies
 - [Story] label maps task to specific user story for traceability
 - All changes are in existing files — no new files created
-- The key implementation is in Phase 2 (T002–T005) — everything else is testing and validation
+- The key implementation is in Phase 2 (T002, T003, T004, T005, T005b, T006, T006b) — everything else is testing, validation, and documentation sync
 - Commit after each phase checkpoint
