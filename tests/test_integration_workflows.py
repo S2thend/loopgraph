@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Iterable, Mapping, cast
+from typing import Any, Iterable, Mapping, cast
 
 import pytest
 
@@ -13,6 +13,89 @@ from loopgraph.core.types import EventType, NodeKind, NodeStatus, VisitOutcome
 from loopgraph.persistence import InMemoryEventLog, InMemorySnapshotStore
 from loopgraph.registry.function_registry import FunctionRegistry
 from loopgraph.scheduler.scheduler import Scheduler
+
+
+def _run_switch_leaf_workflow(
+    *,
+    route: str,
+    branches: list[str],
+    terminal_branches: set[str] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    registry = FunctionRegistry()
+    executed: list[str] = []
+    terminal_branches = terminal_branches or set()
+
+    registry.register("input", lambda payload: None)
+    registry.register("decide", lambda payload: route)
+
+    nodes = {
+        "input": Node(id="input", kind=NodeKind.TASK, handler="input"),
+        "decide": Node(id="decide", kind=NodeKind.SWITCH, handler="decide"),
+    }
+    edges = {
+        "input->decide": Edge(
+            id="input->decide",
+            source="input",
+            target="decide",
+        )
+    }
+
+    for branch in branches:
+        branch_kind = (
+            NodeKind.TERMINAL if branch in terminal_branches else NodeKind.TASK
+        )
+
+        def branch_handler(payload: object, *, branch: str = branch) -> str:
+            executed.append(branch)
+            return branch
+
+        registry.register(branch, branch_handler)
+        nodes[branch] = Node(id=branch, kind=branch_kind, handler=branch)
+        edges[f"decide->{branch}"] = Edge(
+            id=f"decide->{branch}",
+            source="decide",
+            target=branch,
+            metadata={"route": branch},
+        )
+
+    graph = Graph(nodes=nodes, edges=edges)
+    scheduler = Scheduler(registry, EventBus(), PrioritySemaphorePolicy(limit=1))
+    results = asyncio.run(scheduler.run(graph))
+    return results, executed
+
+
+def test_switch_selected_leaf_completes_without_deadlock() -> None:
+    results, executed = _run_switch_leaf_workflow(
+        route="done",
+        branches=["done", "fix"],
+    )
+
+    assert results["done"] == "done"
+    assert "fix" not in results
+    assert executed == ["done"]
+
+
+def test_switch_with_three_leaf_branches_executes_only_selected_route() -> None:
+    results, executed = _run_switch_leaf_workflow(
+        route="review",
+        branches=["done", "fix", "review"],
+    )
+
+    assert results["review"] == "review"
+    assert "done" not in results
+    assert "fix" not in results
+    assert executed == ["review"]
+
+
+@pytest.mark.parametrize("route", ["done", "fix"])
+def test_switch_can_select_each_leaf_branch_across_runs(route: str) -> None:
+    results, executed = _run_switch_leaf_workflow(
+        route=route,
+        branches=["done", "fix"],
+    )
+
+    assert results[route] == route
+    assert executed == [route]
 
 
 def test_complex_workflow_with_switch_and_merge() -> None:
@@ -368,6 +451,65 @@ def test_scheduler_bounded_loop_reentry() -> None:
     assert results["output"] == "done"
 
 
+def test_activation_frontier_aggregate_waits_for_all_upstreams() -> None:
+    registry = FunctionRegistry()
+    event_log = InMemoryEventLog()
+
+    registry.register("start", lambda payload: None)
+    registry.register("left", lambda payload: "left")
+    registry.register("right", lambda payload: "right")
+    registry.register("merge", lambda payload: tuple(cast(list[str], payload)))
+
+    graph = Graph(
+        nodes={
+            "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+            "left": Node(id="left", kind=NodeKind.TASK, handler="left"),
+            "right": Node(id="right", kind=NodeKind.TASK, handler="right"),
+            "merge": Node(
+                id="merge",
+                kind=NodeKind.AGGREGATE,
+                handler="merge",
+                config={"required": 2},
+            ),
+        },
+        edges={
+            "start->left": Edge(id="start->left", source="start", target="left"),
+            "start->right": Edge(id="start->right", source="start", target="right"),
+            "left->merge": Edge(id="left->merge", source="left", target="merge"),
+            "right->merge": Edge(id="right->merge", source="right", target="merge"),
+        },
+    )
+
+    scheduler = Scheduler(
+        registry,
+        EventBus(),
+        PrioritySemaphorePolicy(1),
+        event_log=event_log,
+    )
+    results = asyncio.run(scheduler.run(graph, graph_id="aggregate-frontier"))
+
+    events = [(event.type, event.node_id) for event in event_log.iter("aggregate-frontier")]
+    merge_scheduled_index = next(
+        index
+        for index, event in enumerate(events)
+        if event == (EventType.NODE_SCHEDULED, "merge")
+    )
+    left_completed_index = next(
+        index
+        for index, event in enumerate(events)
+        if event == (EventType.NODE_COMPLETED, "left")
+    )
+    right_completed_index = next(
+        index
+        for index, event in enumerate(events)
+        if event == (EventType.NODE_COMPLETED, "right")
+    )
+
+    assert left_completed_index < merge_scheduled_index
+    assert right_completed_index < merge_scheduled_index
+    assert set(results["merge"]) == {"left", "right"}
+
+
 def test_scheduler_loop_max_visits_1() -> None:
     registry = FunctionRegistry()
     counter = {"loop": 0, "output": 0}
@@ -427,6 +569,81 @@ def test_scheduler_loop_max_visits_1() -> None:
 
     assert counter["loop"] == 1
     assert counter["output"] == 1
+    assert results["output"] == "continue"
+
+
+def test_activation_frontier_loop_reentry_preserves_max_visits_and_visit_counts() -> None:
+    registry = FunctionRegistry()
+    counter = {"loop": 0}
+
+    def start_handler(_: object) -> None:
+        return None
+
+    def loop_handler(_: object) -> dict[str, int]:
+        counter["loop"] += 1
+        return {"iteration": counter["loop"]}
+
+    def switch_handler(_: dict[str, int]) -> str:
+        return "continue"
+
+    def output_handler(payload: str) -> str:
+        return payload
+
+    registry.register("start", start_handler)
+    registry.register("loop", loop_handler)
+    registry.register("switch", switch_handler)
+    registry.register("output", output_handler)
+
+    graph = Graph(
+        nodes={
+            "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+            "loop": Node(
+                id="loop",
+                kind=NodeKind.TASK,
+                handler="loop",
+                max_visits=2,
+                allow_partial_upstream=True,
+            ),
+            "switch": Node(id="switch", kind=NodeKind.SWITCH, handler="switch"),
+            "output": Node(id="output", kind=NodeKind.TASK, handler="output"),
+        },
+        edges={
+            "start->loop": Edge(id="start->loop", source="start", target="loop"),
+            "loop->switch": Edge(id="loop->switch", source="loop", target="switch"),
+            "switch->loop": Edge(
+                id="switch->loop",
+                source="switch",
+                target="loop",
+                metadata={"route": "continue"},
+            ),
+            "switch->output": Edge(
+                id="switch->output",
+                source="switch",
+                target="output",
+                metadata={"route": "exit"},
+            ),
+        },
+    )
+
+    event_log = InMemoryEventLog()
+    scheduler = Scheduler(
+        registry,
+        EventBus(),
+        PrioritySemaphorePolicy(1),
+        event_log=event_log,
+    )
+    results = asyncio.run(
+        scheduler.run(graph, graph_id="activation-frontier-loop")
+    )
+
+    visit_counts = [
+        event.visit_count
+        for event in event_log.iter("activation-frontier-loop")
+        if event.type is EventType.NODE_COMPLETED and event.node_id == "loop"
+    ]
+
+    assert counter["loop"] == 2
+    assert visit_counts == [1, 2]
     assert results["output"] == "continue"
 
 
@@ -530,6 +747,61 @@ def test_scheduler_disjoint_loops_execute() -> None:
     assert results["out_b"] == "done_b"
 
 
+def test_scheduler_zero_entry_nodes_fail_fast() -> None:
+    registry = FunctionRegistry()
+    registry.register("a", lambda payload: "a")
+    registry.register("b", lambda payload: "b")
+
+    graph = Graph(
+        nodes={
+            "a": Node(id="a", kind=NodeKind.TASK, handler="a"),
+            "b": Node(id="b", kind=NodeKind.TASK, handler="b"),
+        },
+        edges={
+            "a->b": Edge(id="a->b", source="a", target="b"),
+            "b->a": Edge(id="b->a", source="b", target="a"),
+        },
+    )
+
+    scheduler = Scheduler(registry, EventBus(), PrioritySemaphorePolicy(1))
+
+    with pytest.raises(ValueError, match="no entry nodes"):
+        asyncio.run(scheduler.run(graph))
+
+
+def test_scheduler_stuck_activated_node_still_raises_runtime_error() -> None:
+    registry = FunctionRegistry()
+    registry.register("start", lambda payload: None)
+    registry.register("gate", lambda payload: "gate")
+    registry.register("blocker", lambda payload: "blocker")
+
+    graph = Graph(
+        nodes={
+            "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+            "gate": Node(id="gate", kind=NodeKind.TASK, handler="gate"),
+            "blocker": Node(id="blocker", kind=NodeKind.TASK, handler="blocker"),
+        },
+        edges={
+            "start->gate": Edge(id="start->gate", source="start", target="gate"),
+            "blocker->gate": Edge(
+                id="blocker->gate",
+                source="blocker",
+                target="gate",
+            ),
+            "blocker->blocker": Edge(
+                id="blocker->blocker",
+                source="blocker",
+                target="blocker",
+            ),
+        },
+    )
+
+    scheduler = Scheduler(registry, EventBus(), PrioritySemaphorePolicy(1))
+
+    with pytest.raises(RuntimeError, match="could not make progress"):
+        asyncio.run(scheduler.run(graph))
+
+
 def test_scheduler_reentry_pending_running_hard_stop() -> None:
     registry = FunctionRegistry()
     registry.register("switch", lambda _: "loop")
@@ -566,8 +838,53 @@ def test_scheduler_reentry_pending_running_hard_stop() -> None:
                 execution_state=state,
                 graph_id="graph",
                 upstream_payload=None,
-            )
         )
+        )
+
+
+def test_terminal_leaf_branch_schedules_like_task_under_activation_frontier() -> None:
+    results, executed = _run_switch_leaf_workflow(
+        route="done",
+        branches=["done", "fix"],
+        terminal_branches={"done"},
+    )
+
+    assert results["done"] == "done"
+    assert "fix" not in results
+    assert executed == ["done"]
+
+
+def test_scheduler_raises_for_switch_route_with_no_matching_edge() -> None:
+    registry = FunctionRegistry()
+    registry.register("start", lambda payload: None)
+    registry.register("switch", lambda payload: "missing")
+    registry.register("done", lambda payload: "done")
+
+    graph = Graph(
+        nodes={
+            "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+            "switch": Node(id="switch", kind=NodeKind.SWITCH, handler="switch"),
+            "done": Node(id="done", kind=NodeKind.TASK, handler="done"),
+        },
+        edges={
+            "start->switch": Edge(
+                id="start->switch",
+                source="start",
+                target="switch",
+            ),
+            "switch->done": Edge(
+                id="switch->done",
+                source="switch",
+                target="done",
+                metadata={"route": "done"},
+            ),
+        },
+    )
+
+    scheduler = Scheduler(registry, EventBus(), PrioritySemaphorePolicy(1))
+
+    with pytest.raises(ValueError, match="switch'.*'missing'"):
+        asyncio.run(scheduler.run(graph))
 
 
 def test_scheduler_unbounded_loop_handler_exit() -> None:

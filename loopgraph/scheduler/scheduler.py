@@ -13,10 +13,12 @@ from .._debug import (
 from ..bus.eventbus import Event, EventBus
 from ..concurrency import ConcurrencyManager, SemaphorePolicy
 from ..core.graph import Edge, Graph, Node
-from ..core.state import ExecutionState
+from ..core.state import SNAPSHOT_FORMAT_VERSION, ExecutionState
 from ..core.types import EventType, NodeKind, NodeStatus, VisitOutcome
 from ..persistence import EventLog, SnapshotStore
 from ..registry.function_registry import FunctionRegistry
+
+SUPPORTED_SNAPSHOT_FORMAT_VERSION = SNAPSHOT_FORMAT_VERSION
 
 
 class Scheduler:
@@ -179,15 +181,28 @@ class Scheduler:
             graph_id=graph_id,
             initial_payload=initial_payload,
         )
-        execution_state = self._load_or_create_state(graph_id)
+        execution_state, resumed_from_snapshot = self._load_or_create_state(graph_id)
         log_variable_change(func_name, "execution_state", execution_state)
+        log_variable_change(func_name, "resumed_from_snapshot", resumed_from_snapshot)
         snapshot_data = execution_state.snapshot()
         log_variable_change(func_name, "snapshot_data", snapshot_data)
         results = self._initial_results_from_snapshot(snapshot_data)
         log_variable_change(func_name, "results", results)
         completed_nodes = set(snapshot_data["completed_nodes"])
         log_variable_change(func_name, "completed_nodes", completed_nodes)
-        pending = {node_id for node_id in graph.nodes if node_id not in completed_nodes}
+        if resumed_from_snapshot:
+            log_branch(func_name, "supported_snapshot_resume")
+            pending = self._seed_pending_from_supported_snapshot(
+                graph=graph,
+                snapshot_data=snapshot_data,
+                completed_nodes=completed_nodes,
+            )
+        else:
+            log_branch(func_name, "fresh_run")
+            pending = self._seed_pending_from_entry_nodes(
+                graph=graph,
+                completed_nodes=completed_nodes,
+            )
         log_variable_change(func_name, "pending", pending)
         loop_iteration = 0
         while pending:
@@ -225,7 +240,11 @@ class Scheduler:
                         status=NodeStatus.RUNNING,
                     )
                 )
-                handler_result, reentry_targets = await self._execute_node(
+                (
+                    handler_result,
+                    reentry_targets,
+                    activated_targets,
+                ) = await self._execute_node(
                     node=node,
                     graph=graph,
                     execution_state=execution_state,
@@ -234,12 +253,34 @@ class Scheduler:
                 )
                 log_variable_change(func_name, "handler_result", handler_result)
                 log_variable_change(func_name, "reentry_targets", reentry_targets)
+                log_variable_change(func_name, "activated_targets", activated_targets)
                 results[node_id] = handler_result
                 log_variable_change(func_name, "results", results)
+                completed_nodes.add(node_id)
+                log_variable_change(func_name, "completed_nodes", completed_nodes)
                 pending.remove(node_id)
                 log_variable_change(func_name, "pending", pending)
+                for (
+                    activated_iteration,
+                    activated_target,
+                ) in enumerate(activated_targets):
+                    log_loop_iteration(
+                        func_name, "activated_targets", activated_iteration
+                    )
+                    if activated_target in completed_nodes:
+                        log_branch(func_name, "activated_target_completed")
+                        continue
+                    log_branch(func_name, "activated_target_pending")
+                    pending.add(activated_target)
+                    log_variable_change(
+                        func_name,
+                        f"pending_with_activated_{activated_target}",
+                        pending,
+                    )
                 for reentry_iteration, reentry_target in enumerate(reentry_targets):
                     log_loop_iteration(func_name, "reentry_targets", reentry_iteration)
+                    completed_nodes.discard(reentry_target)
+                    log_variable_change(func_name, "completed_nodes", completed_nodes)
                     pending.add(reentry_target)
                     log_variable_change(
                         func_name,
@@ -270,7 +311,7 @@ class Scheduler:
         execution_state: ExecutionState,
         graph_id: str,
         upstream_payload: Optional[Any],
-    ) -> Tuple[Any, List[str]]:
+    ) -> Tuple[Any, List[str], List[str]]:
         """Execute a single node handler."""
         func_name = "Scheduler._execute_node"
         log_parameter(
@@ -329,6 +370,8 @@ class Scheduler:
             log_variable_change(func_name, "selected_edges", selected_edges)
             reentry_targets: List[str] = []
             log_variable_change(func_name, "reentry_targets", reentry_targets)
+            activated_targets: List[str] = []
+            log_variable_change(func_name, "activated_targets", activated_targets)
             for iteration, edge in enumerate(selected_edges):
                 log_loop_iteration(func_name, "downstream_edges", iteration)
                 log_variable_change(func_name, "edge", edge)
@@ -364,6 +407,12 @@ class Scheduler:
                     log_branch(func_name, "reentry_failed_skip")
                 elif downstream_visits == 0 and downstream_status is NodeStatus.PENDING:
                     log_branch(func_name, "initial_pending_target")
+                    activated_targets.append(downstream.id)
+                    log_variable_change(
+                        func_name,
+                        "activated_targets",
+                        list(activated_targets),
+                    )
                 else:
                     log_branch(func_name, "reentry_non_terminal_error")
                     raise RuntimeError(
@@ -372,7 +421,7 @@ class Scheduler:
                     )
                 execution_state.note_upstream_completion(downstream.id, node.id)
             self._persist_snapshot(execution_state, graph_id)
-            return result, reentry_targets
+            return result, reentry_targets, activated_targets
 
     def _build_input_payload(
         self,
@@ -474,7 +523,9 @@ class Scheduler:
             log_branch(func_name, "fallback_exit")
             return exit_edges
         log_branch(func_name, "no_matching_edge")
-        return []
+        raise ValueError(
+            f"Switch node '{node.id}' returned unmatched route {route!r} with no fallback edge"
+        )
 
     def _has_remaining_visits(
         self, graph: Graph, execution_state: ExecutionState, node_id: str
@@ -493,7 +544,7 @@ class Scheduler:
         log_variable_change(func_name, "has_capacity", has_capacity)
         return has_capacity
 
-    def _load_or_create_state(self, graph_id: str) -> ExecutionState:
+    def _load_or_create_state(self, graph_id: str) -> Tuple[ExecutionState, bool]:
         """Retrieve execution state from snapshots if available."""
 
         func_name = "Scheduler._load_or_create_state"
@@ -502,18 +553,151 @@ class Scheduler:
             log_branch(func_name, "no_snapshot_store")
             state = ExecutionState()
             log_variable_change(func_name, "state", state)
-            return state
+            return state, False
 
         try:
             snapshot_payload = self._snapshot_store.load(graph_id)
         except KeyError:
             log_branch(func_name, "snapshot_missing")
             state = ExecutionState()
+            resumed_from_snapshot = False
         else:
             log_branch(func_name, "snapshot_loaded")
-            state = ExecutionState.restore(dict(snapshot_payload))
+            log_variable_change(func_name, "snapshot_payload", snapshot_payload)
+            snapshot_dict = dict(snapshot_payload)
+            log_variable_change(func_name, "snapshot_dict", snapshot_dict)
+            self._validate_snapshot_format(snapshot_dict)
+            state = ExecutionState.restore(snapshot_dict)
+            self._reset_running_nodes_for_resume(
+                execution_state=state,
+                snapshot_data=snapshot_dict,
+            )
+            resumed_from_snapshot = True
         log_variable_change(func_name, "state", state)
-        return state
+        log_variable_change(
+            func_name, "resumed_from_snapshot", resumed_from_snapshot
+        )
+        return state, resumed_from_snapshot
+
+    def _validate_snapshot_format(self, snapshot_data: Dict[str, Any]) -> None:
+        """Reject unsupported snapshot payloads before restore."""
+
+        func_name = "Scheduler._validate_snapshot_format"
+        log_parameter(func_name, snapshot_data=snapshot_data)
+        version = snapshot_data.get("snapshot_format_version")
+        log_variable_change(func_name, "version", version)
+        log_variable_change(
+            func_name,
+            "supported_version",
+            SUPPORTED_SNAPSHOT_FORMAT_VERSION,
+        )
+        if version == SUPPORTED_SNAPSHOT_FORMAT_VERSION:
+            log_branch(func_name, "supported_version")
+            return
+        log_branch(func_name, "unsupported_version")
+        raise ValueError(
+            "Unsupported snapshot format version "
+            f"{version!r}; supported version is "
+            f"{SUPPORTED_SNAPSHOT_FORMAT_VERSION}. "
+            "Discard or migrate the snapshot before resuming."
+        )
+
+    def _reset_running_nodes_for_resume(
+        self,
+        *,
+        execution_state: ExecutionState,
+        snapshot_data: Dict[str, Any],
+    ) -> None:
+        """Reset RUNNING snapshot nodes to PENDING before scheduling."""
+
+        func_name = "Scheduler._reset_running_nodes_for_resume"
+        log_parameter(
+            func_name,
+            execution_state=execution_state,
+            snapshot_data=snapshot_data,
+        )
+        for iteration, (node_id, node_state) in enumerate(
+            snapshot_data.get("states", {}).items()
+        ):
+            log_loop_iteration(func_name, "states", iteration)
+            status_value = node_state.get("status")
+            log_variable_change(func_name, "status_value", status_value)
+            if status_value != NodeStatus.RUNNING.value:
+                log_branch(func_name, "state_not_running")
+                continue
+            log_branch(func_name, "reset_running_to_pending")
+            state = execution_state._ensure_state(node_id)
+            log_variable_change(func_name, "state_before", state)
+            state.status = NodeStatus.PENDING
+            log_variable_change(func_name, "state_after", state)
+
+    def _seed_pending_from_entry_nodes(
+        self,
+        *,
+        graph: Graph,
+        completed_nodes: set[str],
+    ) -> set[str]:
+        """Seed a fresh run from entry nodes only."""
+
+        func_name = "Scheduler._seed_pending_from_entry_nodes"
+        log_parameter(func_name, graph=graph, completed_nodes=completed_nodes)
+        entry_nodes = graph.entry_nodes()
+        log_variable_change(func_name, "entry_nodes", entry_nodes)
+        entry_ids = {node.id for node in entry_nodes}
+        log_variable_change(func_name, "entry_ids", entry_ids)
+        if graph.nodes and not entry_ids:
+            log_branch(func_name, "no_entry_nodes")
+            raise ValueError("Graph has no entry nodes (nodes with no upstream edges)")
+        log_branch(func_name, "seed_from_entries")
+        pending = {node_id for node_id in entry_ids if node_id not in completed_nodes}
+        log_variable_change(func_name, "pending", pending)
+        return pending
+
+    def _seed_pending_from_supported_snapshot(
+        self,
+        *,
+        graph: Graph,
+        snapshot_data: Dict[str, Any],
+        completed_nodes: set[str],
+    ) -> set[str]:
+        """Seed a resumed run from supported snapshot state plus entry nodes."""
+
+        func_name = "Scheduler._seed_pending_from_supported_snapshot"
+        log_parameter(
+            func_name,
+            graph=graph,
+            snapshot_data=snapshot_data,
+            completed_nodes=completed_nodes,
+        )
+        pending: set[str] = set()
+        log_variable_change(func_name, "pending", pending)
+        for iteration, node in enumerate(graph.entry_nodes()):
+            log_loop_iteration(func_name, "entry_nodes", iteration)
+            if node.id in completed_nodes:
+                log_branch(func_name, "entry_completed")
+                continue
+            log_branch(func_name, "entry_pending")
+            pending.add(node.id)
+            log_variable_change(func_name, "pending", pending)
+        for iteration, (node_id, node_state) in enumerate(
+            snapshot_data.get("states", {}).items()
+        ):
+            log_loop_iteration(func_name, "snapshot_states", iteration)
+            status_value = node_state.get("status")
+            log_variable_change(func_name, "status_value", status_value)
+            if node_id in completed_nodes:
+                log_branch(func_name, "snapshot_node_completed")
+                continue
+            if status_value not in (
+                NodeStatus.PENDING.value,
+                NodeStatus.RUNNING.value,
+            ):
+                log_branch(func_name, "snapshot_node_not_activated")
+                continue
+            log_branch(func_name, "snapshot_node_pending")
+            pending.add(node_id)
+            log_variable_change(func_name, "pending", pending)
+        return pending
 
     def _initial_results_from_snapshot(
         self, snapshot: Dict[str, Any]
