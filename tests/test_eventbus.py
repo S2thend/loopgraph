@@ -60,6 +60,7 @@ async def test_emit_with_on_error_invokes_handler() -> None:
 @pytest.mark.asyncio
 async def test_emit_on_error_can_raise() -> None:
     """If on_error raises, the exception propagates to caller."""
+
     async def raising_error_handler(exc: Exception, event: Event) -> None:
         raise RuntimeError(f"critical error handling {exc}")
 

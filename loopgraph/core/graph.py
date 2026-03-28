@@ -168,9 +168,7 @@ class Graph:
                             f"Aggregate node '{node.id}' requires 'required' > 0"
                         )
                     upstream_count = len(self.upstream_nodes(node.id))
-                    log_variable_change(
-                        func_name, "upstream_count", upstream_count
-                    )
+                    log_variable_change(func_name, "upstream_count", upstream_count)
                     if required_raw > upstream_count:
                         log_branch(func_name, "aggregate_required_exceeds_upstream")
                         raise ValueError(
@@ -200,18 +198,14 @@ class Graph:
             log_branch(func_name, "shared_node_multi_loop_error")
             shared_list = sorted(shared_nodes)
             log_variable_change(func_name, "shared_list", shared_list)
-            raise ValueError(
-                f"Graph has multi-loop shared nodes: {shared_list}"
-            )
+            raise ValueError(f"Graph has multi-loop shared nodes: {shared_list}")
         log_branch(func_name, "cycle_validation_passed")
 
     @staticmethod
     def _canonical_cycle(cycle: List[str]) -> Tuple[str, ...]:
         """Normalize a cycle so equivalent rotations share one representation."""
         cycle_len = len(cycle)
-        rotations = [
-            tuple(cycle[index:] + cycle[:index]) for index in range(cycle_len)
-        ]
+        rotations = [tuple(cycle[index:] + cycle[:index]) for index in range(cycle_len)]
         return min(rotations)
 
     def _find_cycles(self) -> List[Tuple[str, ...]]:
@@ -359,7 +353,9 @@ class Graph:
         return payload
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Iterable[Mapping[str, object]]]) -> "Graph":
+    def from_dict(
+        cls, payload: Mapping[str, Iterable[Mapping[str, object]]]
+    ) -> "Graph":
         """Deserialize a graph from a dictionary payload."""
         func_name = "Graph.from_dict"
         log_parameter(func_name, payload=payload)

@@ -406,9 +406,7 @@ class Scheduler:
                 log_loop_iteration(func_name, "aggregate_upstream", iteration)
                 if upstream.id in results:
                     aggregated.append(results[upstream.id])
-                    log_variable_change(
-                        func_name, "aggregated", list(aggregated)
-                    )
+                    log_variable_change(func_name, "aggregated", list(aggregated))
             log_variable_change(func_name, "payload", aggregated)
             return aggregated
 
@@ -517,7 +515,9 @@ class Scheduler:
         log_variable_change(func_name, "state", state)
         return state
 
-    def _initial_results_from_snapshot(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    def _initial_results_from_snapshot(
+        self, snapshot: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Extract node results from a snapshot payload."""
 
         func_name = "Scheduler._initial_results_from_snapshot"
@@ -541,9 +541,7 @@ class Scheduler:
         log_variable_change(func_name, "results_final", results)
         return results
 
-    def _persist_snapshot(
-        self, execution_state: ExecutionState, graph_id: str
-    ) -> None:
+    def _persist_snapshot(self, execution_state: ExecutionState, graph_id: str) -> None:
         """Persist execution state snapshot if a store is configured."""
 
         func_name = "Scheduler._persist_snapshot"

@@ -94,14 +94,18 @@ def test_complex_workflow_with_switch_and_merge() -> None:
         edges={
             "start->switch": Edge(id="start->switch", source="start", target="switch"),
             "start->audit": Edge(id="start->audit", source="start", target="audit"),
-            "start->process": Edge(id="start->process", source="start", target="process"),
+            "start->process": Edge(
+                id="start->process", source="start", target="process"
+            ),
             "switch->process": Edge(
                 id="switch->process",
                 source="switch",
                 target="process",
                 metadata={"route": "process"},
             ),
-            "process->merge": Edge(id="process->merge", source="process", target="merge"),
+            "process->merge": Edge(
+                id="process->merge", source="process", target="merge"
+            ),
             "audit->merge": Edge(id="audit->merge", source="audit", target="merge"),
             "merge->final": Edge(id="merge->final", source="merge", target="final"),
         },
@@ -868,8 +872,12 @@ def test_payload_propagation_between_nodes() -> None:
             "final": Node(id="final", kind=NodeKind.TASK, handler="final"),
         },
         edges={
-            "start->transform": Edge(id="start->transform", source="start", target="transform"),
-            "transform->final": Edge(id="transform->final", source="transform", target="final"),
+            "start->transform": Edge(
+                id="start->transform", source="start", target="transform"
+            ),
+            "transform->final": Edge(
+                id="transform->final", source="transform", target="final"
+            ),
         },
     )
 
