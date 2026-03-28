@@ -98,6 +98,120 @@ def test_switch_can_select_each_leaf_branch_across_runs(route: str) -> None:
     assert executed == [route]
 
 
+def test_issue_5_switch_to_terminal_path_does_not_leave_fix_branch_pending() -> None:
+    registry = FunctionRegistry()
+    executed: list[str] = []
+
+    def step(name: str):
+        def handler(payload: object) -> str:
+            executed.append(name)
+            return name
+
+        return handler
+
+    def decide_handler(payload: object) -> str:
+        executed.append("decide")
+        return "done"
+
+    registry.register("input", step("input"))
+    registry.register("prompt_build", step("prompt_build"))
+    registry.register("research", step("research"))
+    registry.register("extract", step("extract"))
+    registry.register("repair", step("repair"))
+    registry.register("validate", step("validate"))
+    registry.register("decide", decide_handler)
+    registry.register("done", step("done"))
+    registry.register("fix", step("fix"))
+
+    graph = Graph(
+        nodes={
+            "input": Node(id="input", kind=NodeKind.TASK, handler="input"),
+            "prompt_build": Node(
+                id="prompt_build",
+                kind=NodeKind.TASK,
+                handler="prompt_build",
+            ),
+            "research": Node(id="research", kind=NodeKind.TASK, handler="research"),
+            "extract": Node(id="extract", kind=NodeKind.TASK, handler="extract"),
+            "repair": Node(
+                id="repair",
+                kind=NodeKind.TASK,
+                handler="repair",
+                allow_partial_upstream=True,
+            ),
+            "validate": Node(id="validate", kind=NodeKind.TASK, handler="validate"),
+            "decide": Node(id="decide", kind=NodeKind.SWITCH, handler="decide"),
+            "done": Node(id="done", kind=NodeKind.TERMINAL, handler="done"),
+            "fix": Node(id="fix", kind=NodeKind.TASK, handler="fix"),
+        },
+        edges={
+            "input->prompt_build": Edge(
+                id="input->prompt_build",
+                source="input",
+                target="prompt_build",
+            ),
+            "prompt_build->research": Edge(
+                id="prompt_build->research",
+                source="prompt_build",
+                target="research",
+            ),
+            "research->extract": Edge(
+                id="research->extract",
+                source="research",
+                target="extract",
+            ),
+            "extract->repair": Edge(
+                id="extract->repair",
+                source="extract",
+                target="repair",
+            ),
+            "repair->validate": Edge(
+                id="repair->validate",
+                source="repair",
+                target="validate",
+            ),
+            "validate->decide": Edge(
+                id="validate->decide",
+                source="validate",
+                target="decide",
+            ),
+            "decide->done": Edge(
+                id="decide->done",
+                source="decide",
+                target="done",
+                metadata={"route": "done"},
+            ),
+            "decide->fix": Edge(
+                id="decide->fix",
+                source="decide",
+                target="fix",
+                metadata={"route": "fix"},
+            ),
+            "fix->repair": Edge(
+                id="fix->repair",
+                source="fix",
+                target="repair",
+            ),
+        },
+    )
+
+    scheduler = Scheduler(registry, EventBus(), PrioritySemaphorePolicy(limit=1))
+    results = asyncio.run(scheduler.run(graph))
+
+    assert results["done"] == "done"
+    assert "fix" not in results
+    assert executed == [
+        "input",
+        "prompt_build",
+        "research",
+        "extract",
+        "repair",
+        "validate",
+        "decide",
+        "done",
+    ]
+
+
 def test_complex_workflow_with_switch_and_merge() -> None:
     registry = FunctionRegistry()
 
@@ -488,7 +602,9 @@ def test_activation_frontier_aggregate_waits_for_all_upstreams() -> None:
     )
     results = asyncio.run(scheduler.run(graph, graph_id="aggregate-frontier"))
 
-    events = [(event.type, event.node_id) for event in event_log.iter("aggregate-frontier")]
+    events = [
+        (event.type, event.node_id) for event in event_log.iter("aggregate-frontier")
+    ]
     merge_scheduled_index = next(
         index
         for index, event in enumerate(events)
@@ -572,7 +688,9 @@ def test_scheduler_loop_max_visits_1() -> None:
     assert results["output"] == "continue"
 
 
-def test_activation_frontier_loop_reentry_preserves_max_visits_and_visit_counts() -> None:
+def test_activation_frontier_loop_reentry_preserves_max_visits_and_visit_counts() -> (
+    None
+):
     registry = FunctionRegistry()
     counter = {"loop": 0}
 
@@ -632,9 +750,7 @@ def test_activation_frontier_loop_reentry_preserves_max_visits_and_visit_counts(
         PrioritySemaphorePolicy(1),
         event_log=event_log,
     )
-    results = asyncio.run(
-        scheduler.run(graph, graph_id="activation-frontier-loop")
-    )
+    results = asyncio.run(scheduler.run(graph, graph_id="activation-frontier-loop"))
 
     visit_counts = [
         event.visit_count
@@ -838,7 +954,7 @@ def test_scheduler_reentry_pending_running_hard_stop() -> None:
                 execution_state=state,
                 graph_id="graph",
                 upstream_payload=None,
-        )
+            )
         )
 
 

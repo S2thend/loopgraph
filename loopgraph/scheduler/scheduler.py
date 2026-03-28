@@ -574,9 +574,7 @@ class Scheduler:
             )
             resumed_from_snapshot = True
         log_variable_change(func_name, "state", state)
-        log_variable_change(
-            func_name, "resumed_from_snapshot", resumed_from_snapshot
-        )
+        log_variable_change(func_name, "resumed_from_snapshot", resumed_from_snapshot)
         return state, resumed_from_snapshot
 
     def _validate_snapshot_format(self, snapshot_data: Dict[str, Any]) -> None:
