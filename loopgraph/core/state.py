@@ -14,6 +14,8 @@ from .._debug import (
 from .graph import Graph
 from .types import NodeKind, NodeStatus, VisitOutcome
 
+SNAPSHOT_FORMAT_VERSION = 2
+
 
 @dataclass
 class NodeVisit:
@@ -390,7 +392,11 @@ class ExecutionState:
         log_variable_change(func_name, "state_after", state)
 
     def snapshot(self) -> Dict[str, Any]:
-        """Produce a JSON-serializable snapshot of execution state."""
+        """Produce a JSON-serializable snapshot of execution state.
+
+        >>> ExecutionState().snapshot()["snapshot_format_version"]
+        2
+        """
         func_name = "ExecutionState.snapshot"
         log_parameter(func_name)
         states_payload: Dict[str, Dict[str, Any]] = {}
@@ -402,6 +408,7 @@ class ExecutionState:
                 func_name, f"states_payload[{node_id!r}]", states_payload[node_id]
             )
         payload = {
+            "snapshot_format_version": SNAPSHOT_FORMAT_VERSION,
             "states": states_payload,
             "completed_nodes": sorted(self._completed_nodes),
         }

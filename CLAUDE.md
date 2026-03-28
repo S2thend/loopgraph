@@ -3,6 +3,7 @@
 Auto-generated from all feature plans. Last updated: 2026-02-20
 
 ## Active Technologies
+- N/A (in-memory state + optional pluggable snapshot/event stores) (002-activation-frontier)
 
 - Python 3.10+ + None (zero runtime dependencies) (001-scheduler-loop-reentry)
 
@@ -22,6 +23,7 @@ cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLO
 Python 3.10+: Follow standard conventions
 
 ## Recent Changes
+- 002-activation-frontier: Added Python 3.10+ + None (zero runtime dependencies)
 
 - 001-scheduler-loop-reentry: Added Python 3.10+ + None (zero runtime dependencies)
 

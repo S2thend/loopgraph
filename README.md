@@ -116,6 +116,30 @@ registry.register("my_node", make_handler(bus, my_agent))
 - Reset clears upstream-completion tracking and preserves cumulative `visit_count`
 - Overlapping loops sharing any node are rejected at graph construction time
 
+## Scheduler Semantics
+
+- The scheduler seeds its internal pending set from graph entry nodes only. A
+  node enters pending later only when an upstream edge actually activates it.
+- Unselected `SWITCH` branches never enter pending, so leaf branches that were
+  not chosen cannot deadlock the workflow.
+- A graph with nodes but no entry nodes now fails fast with `ValueError`
+  instead of entering a deadlocked run loop.
+- If a `SWITCH` returns a route that matches no downstream edge and no
+  `exit` fallback edge exists, the scheduler raises `ValueError`.
+- `NodeKind.TERMINAL` keeps the same runtime scheduling semantics as `TASK`.
+
+## Recovery Boundaries
+
+- Persisted scheduler snapshots now include `snapshot_format_version`.
+- Resume is supported only for snapshots with the current supported snapshot
+  format version.
+- If a snapshot is missing `snapshot_format_version` or carries an unsupported
+  version, resume fails fast with a `ValueError` that reports the actual
+  version, the supported version, and discard-or-migrate guidance.
+- On resume, pending is rebuilt from uncompleted entry nodes plus nodes already
+  persisted as `PENDING` or `RUNNING`. Persisted `RUNNING` nodes are reset to
+  `PENDING` before scheduling.
+
 ---
 
 ## Installation

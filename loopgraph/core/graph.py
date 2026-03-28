@@ -321,6 +321,36 @@ class Graph:
         log_variable_change(func_name, "sources", sources)
         return sources
 
+    def entry_nodes(self) -> List[Node]:
+        """Return nodes with no upstream edges.
+
+        >>> graph = Graph(
+        ...     nodes={
+        ...         "start": Node(id="start", kind=NodeKind.TASK, handler="start"),
+        ...         "middle": Node(id="middle", kind=NodeKind.TASK, handler="middle"),
+        ...         "lonely": Node(id="lonely", kind=NodeKind.TASK, handler="lonely"),
+        ...     },
+        ...     edges={"e": Edge(id="e", source="start", target="middle")},
+        ... )
+        >>> [node.id for node in graph.entry_nodes()]
+        ['start', 'lonely']
+        """
+        func_name = "Graph.entry_nodes"
+        log_parameter(func_name)
+        entries: List[Node] = []
+        log_variable_change(func_name, "entries", entries)
+        for iteration, node_id in enumerate(self.nodes):
+            log_loop_iteration(func_name, "nodes", iteration)
+            reverse_edges = self._reverse_adj.get(node_id, [])
+            log_variable_change(func_name, "reverse_edges", reverse_edges)
+            if reverse_edges:
+                log_branch(func_name, "has_upstream")
+                continue
+            log_branch(func_name, "entry_node")
+            entries.append(self.nodes[node_id])
+            log_variable_change(func_name, "entries", list(entries))
+        return entries
+
     def to_dict(self) -> Dict[str, object]:
         """Serialize the graph to a dictionary."""
         func_name = "Graph.to_dict"
